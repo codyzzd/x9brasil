@@ -2,7 +2,14 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowDown, ArrowRight, ArrowUp, Minus, SearchX } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowRight,
+  ArrowUp,
+  ArrowUpDown,
+  Minus,
+  SearchX,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -15,19 +22,34 @@ import {
 } from "@/components/ui/table";
 import {
   formatCurrency,
+  type PublicValueRankedDeputy,
   type RankChange,
   type RankedDeputy,
+  type RankingIndex,
 } from "@/lib/ranking";
+import { dimensionExplanation } from "@/lib/dimension-explanations";
 import { cn } from "@/lib/utils";
 import { DimensionScore } from "./dimension-score";
 import { SemanticScore } from "./semantic-score";
+import type {
+  RankingDirection,
+} from "./ranking-browser";
+import type { RankingOrder } from "./ranking-filters";
 
 export function RankingTable({
   deputies,
+  index,
+  order,
+  direction,
+  onOrderChange,
   contextQuery,
   rankChanges,
 }: {
-  deputies: RankedDeputy[];
+  deputies: Array<RankedDeputy | PublicValueRankedDeputy>;
+  index: RankingIndex;
+  order: RankingOrder;
+  direction: RankingDirection;
+  onOrderChange: (value: RankingOrder) => void;
   contextQuery: string;
   rankChanges: Map<number, RankChange>;
 }) {
@@ -49,13 +71,63 @@ export function RankingTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-16 text-center">#</TableHead>
-              <TableHead>Deputado</TableHead>
-              <TableHead className="min-w-28">Participação</TableHead>
-              <TableHead className="min-w-28">Produção</TableHead>
-              <TableHead className="min-w-28">Recursos</TableHead>
-              <TableHead className="min-w-28">Transparência</TableHead>
-              <TableHead className="w-28 text-center">Score</TableHead>
+              <SortableHead
+                className="w-16"
+                label="#"
+                value="score"
+                order={order}
+                direction={direction}
+                onOrderChange={onOrderChange}
+                centered
+              />
+              <SortableHead
+                label="Deputado"
+                value="name"
+                order={order}
+                direction={direction}
+                onOrderChange={onOrderChange}
+              />
+              <SortableHead
+                className="min-w-28"
+                label="Participação"
+                value="participation"
+                order={order}
+                direction={direction}
+                onOrderChange={onOrderChange}
+              />
+              <SortableHead
+                className="min-w-28"
+                label={index === "public-value" ? "Contribuição" : "Produção"}
+                value={index === "public-value" ? "contribution" : "production"}
+                order={order}
+                direction={direction}
+                onOrderChange={onOrderChange}
+              />
+              <SortableHead
+                className="min-w-28"
+                label={index === "public-value" ? "Eficiência" : "Recursos"}
+                value={index === "public-value" ? "efficiency" : "resources"}
+                order={order}
+                direction={direction}
+                onOrderChange={onOrderChange}
+              />
+              <SortableHead
+                className="min-w-28"
+                label="Transparência"
+                value="transparency"
+                order={order}
+                direction={direction}
+                onOrderChange={onOrderChange}
+              />
+              <SortableHead
+                className="w-28"
+                label="Score"
+                value="score"
+                order={order}
+                direction={direction}
+                onOrderChange={onOrderChange}
+                centered
+              />
               <TableHead className="w-28" />
             </TableRow>
           </TableHeader>
@@ -75,20 +147,58 @@ export function RankingTable({
                   <DimensionScore
                     label={`${deputy.metrics.plenaryAttendances ?? "N/D"} sessões`}
                     value={deputy.dimensions.participation}
+                    explanation={dimensionExplanation(
+                      deputy,
+                      index,
+                      "participation",
+                    )}
+                    index={index}
                     compact
                   />
                 </TableCell>
                 <TableCell>
-                  <DimensionScore
-                    label={`${deputy.metrics.substantiveProposals ?? "N/D"} propostas`}
-                    value={deputy.dimensions.production}
-                    compact
-                  />
+                  {index === "public-value" ? (
+                    <DimensionScore
+                      label={`${deputy.metrics.publicClassifiedProposals ?? 0}/${
+                        deputy.metrics.publicTotalProposals ?? 0
+                      } classificadas`}
+                      value={publicDimension(deputy, "contribution")}
+                      explanation={dimensionExplanation(
+                        deputy,
+                        index,
+                        "contribution",
+                      )}
+                      index={index}
+                      compact
+                    />
+                  ) : (
+                    <DimensionScore
+                      label={`${deputy.metrics.substantiveProposals ?? "N/D"} propostas`}
+                      value={currentDimension(deputy, "production")}
+                      explanation={dimensionExplanation(
+                        deputy,
+                        index,
+                        "production",
+                      )}
+                      index={index}
+                      compact
+                    />
+                  )}
                 </TableCell>
                 <TableCell>
                   <DimensionScore
                     label={formatCurrency(deputy.metrics.expensesTotal)}
-                    value={deputy.dimensions.resources}
+                    value={
+                      index === "public-value"
+                        ? publicDimension(deputy, "efficiency")
+                        : currentDimension(deputy, "resources")
+                    }
+                    explanation={dimensionExplanation(
+                      deputy,
+                      index,
+                      index === "public-value" ? "efficiency" : "resources",
+                    )}
+                    index={index}
                     compact
                   />
                 </TableCell>
@@ -96,11 +206,17 @@ export function RankingTable({
                   <DimensionScore
                     label="dados oficiais"
                     value={deputy.dimensions.transparency}
+                    explanation={dimensionExplanation(
+                      deputy,
+                      index,
+                      "transparency",
+                    )}
+                    index={index}
                     compact
                   />
                 </TableCell>
                 <TableCell className="text-center">
-                  <SemanticScore value={deputy.score} compact />
+                  <SemanticScore value={deputy.score} index={index} compact />
                 </TableCell>
                 <TableCell>
                   <Link
@@ -129,7 +245,7 @@ export function RankingTable({
               <div className="min-w-0 flex-1">
                 <DeputyIdentity deputy={deputy} />
               </div>
-              <SemanticScore value={deputy.score} compact />
+              <SemanticScore value={deputy.score} index={index} compact />
             </div>
             <div className="mt-3 pl-11">
               <RankTrend change={rankChanges.get(deputy.id)} />
@@ -138,12 +254,50 @@ export function RankingTable({
               <DimensionScore
                 label="Participação"
                 value={deputy.dimensions.participation}
+                explanation={dimensionExplanation(
+                  deputy,
+                  index,
+                  "participation",
+                )}
+                index={index}
               />
-              <DimensionScore label="Produção" value={deputy.dimensions.production} />
-              <DimensionScore label="Recursos" value={deputy.dimensions.resources} />
+              <DimensionScore
+                label={index === "public-value" ? "Contribuição" : "Produção"}
+                value={
+                  index === "public-value"
+                    ? publicDimension(deputy, "contribution")
+                    : currentDimension(deputy, "production")
+                }
+                explanation={dimensionExplanation(
+                  deputy,
+                  index,
+                  index === "public-value" ? "contribution" : "production",
+                )}
+                index={index}
+              />
+              <DimensionScore
+                label={index === "public-value" ? "Eficiência" : "Recursos"}
+                value={
+                  index === "public-value"
+                    ? publicDimension(deputy, "efficiency")
+                    : currentDimension(deputy, "resources")
+                }
+                explanation={dimensionExplanation(
+                  deputy,
+                  index,
+                  index === "public-value" ? "efficiency" : "resources",
+                )}
+                index={index}
+              />
               <DimensionScore
                 label="Transparência"
                 value={deputy.dimensions.transparency}
+                explanation={dimensionExplanation(
+                  deputy,
+                  index,
+                  "transparency",
+                )}
+                index={index}
               />
             </div>
             <Link
@@ -159,6 +313,62 @@ export function RankingTable({
         ))}
       </div>
     </>
+  );
+}
+
+function SortableHead({
+  label,
+  value,
+  order,
+  direction,
+  onOrderChange,
+  className,
+  centered = false,
+}: {
+  label: string;
+  value: RankingOrder;
+  order: RankingOrder;
+  direction: RankingDirection;
+  onOrderChange: (value: RankingOrder) => void;
+  className?: string;
+  centered?: boolean;
+}) {
+  const active = order === value;
+  const Icon = active
+    ? direction === "asc"
+      ? ArrowUp
+      : ArrowDown
+    : ArrowUpDown;
+  return (
+    <TableHead
+      className={className}
+      aria-sort={
+        active
+          ? direction === "asc"
+            ? "ascending"
+            : "descending"
+          : "none"
+      }
+    >
+      <button
+        type="button"
+        onClick={() => onOrderChange(value)}
+        className={cn(
+          "-mx-2 inline-flex min-h-10 w-[calc(100%+1rem)] items-center gap-1.5 px-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          centered && "justify-center text-center",
+          active && "font-semibold",
+        )}
+      >
+        {label}
+        <Icon
+          className={cn(
+            "size-3.5",
+            active ? "text-foreground" : "text-muted-foreground/60",
+          )}
+          aria-hidden="true"
+        />
+      </button>
+    </TableHead>
   );
 }
 
@@ -199,7 +409,11 @@ function RankTrend({
   );
 }
 
-function DeputyIdentity({ deputy }: { deputy: RankedDeputy }) {
+function DeputyIdentity({
+  deputy,
+}: {
+  deputy: RankedDeputy | PublicValueRankedDeputy;
+}) {
   return (
     <div className="flex min-w-0 items-center gap-3">
       <div className="relative size-12 shrink-0 overflow-hidden rounded-full bg-muted outline outline-1 -outline-offset-1 outline-black/10">
@@ -231,6 +445,26 @@ function DeputyIdentity({ deputy }: { deputy: RankedDeputy }) {
       </div>
     </div>
   );
+}
+
+function currentDimension(
+  deputy: RankedDeputy | PublicValueRankedDeputy,
+  key: "production" | "resources",
+) {
+  if (!("production" in deputy.dimensions)) return null;
+  return key === "production"
+    ? deputy.dimensions.production
+    : deputy.dimensions.resources;
+}
+
+function publicDimension(
+  deputy: RankedDeputy | PublicValueRankedDeputy,
+  key: "contribution" | "efficiency",
+) {
+  if (!("contribution" in deputy.dimensions)) return null;
+  return key === "contribution"
+    ? deputy.dimensions.contribution
+    : deputy.dimensions.efficiency;
 }
 
 function labelStyle(label: string) {

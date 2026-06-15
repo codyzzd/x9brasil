@@ -1,17 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  calculatePublicValueRanking,
   calculateRanking,
   calculateRankChanges,
   filterRankingCohort,
   materializePeriod,
   percentileRanks,
+  publicValueScoreBand,
   SCORE_WEIGHTS,
   searchRankedDeputies,
   scoreBand,
   type DeputyRecord,
   type RankingSnapshot,
 } from "./ranking";
+import { PUBLIC_VALUE_WEIGHTS } from "./public-value";
 
 const deputy = (
   id: number,
@@ -62,6 +65,15 @@ test("uses equal weights for all score dimensions", () => {
   });
 });
 
+test("public value index uses the experimental weights", () => {
+  assert.deepEqual(PUBLIC_VALUE_WEIGHTS, {
+    contribution: 0.5,
+    efficiency: 0.25,
+    participation: 0.15,
+    transparency: 0.1,
+  });
+});
+
 test("percentiles preserve ties", () => {
   assert.deepEqual(percentileRanks([10, 20, 20, 30]), [0, 50, 50, 100]);
 });
@@ -109,12 +121,62 @@ test("missing metrics are not converted to zero", () => {
   assert.equal(result.find((item) => item.id === 1)?.score, null);
 });
 
+test("unclassified proposals do not become zero contribution", () => {
+  const result = calculatePublicValueRanking([
+    deputy(1, {
+      publicContributionPoints: null,
+      publicClassifiedProposals: 0,
+      publicTotalProposals: 4,
+    }),
+    deputy(2, {
+      publicContributionPoints: 10,
+      publicClassifiedProposals: 2,
+      publicTotalProposals: 2,
+    }),
+  ]);
+  const pending = result.find((item) => item.id === 1);
+  assert.equal(pending?.dimensions.contribution, null);
+  assert.equal(pending?.score, null);
+});
+
+test("public value ranking rewards more contribution per expense", () => {
+  const result = calculatePublicValueRanking([
+    deputy(1, {
+      publicContributionPoints: 20,
+      publicClassifiedProposals: 2,
+      publicTotalProposals: 2,
+      expensesTotal: 100_000,
+    }),
+    deputy(2, {
+      publicContributionPoints: 20,
+      publicClassifiedProposals: 2,
+      publicTotalProposals: 2,
+      expensesTotal: 300_000,
+    }),
+  ]);
+  const efficient = result.find((item) => item.id === 1);
+  const expensive = result.find((item) => item.id === 2);
+  assert.ok(
+    (efficient?.dimensions.efficiency ?? 0) >
+      (expensive?.dimensions.efficiency ?? 0),
+  );
+});
+
 test("score bands follow the traffic-light thresholds", () => {
   assert.equal(scoreBand(null), "unavailable");
   assert.equal(scoreBand(49), "low");
   assert.equal(scoreBand(50), "medium");
   assert.equal(scoreBand(64), "medium");
   assert.equal(scoreBand(65), "good");
+});
+
+test("public value bands follow the five experimental thresholds", () => {
+  assert.equal(publicValueScoreBand(null), "unavailable");
+  assert.equal(publicValueScoreBand(39), "very-low");
+  assert.equal(publicValueScoreBand(40), "low");
+  assert.equal(publicValueScoreBand(60), "medium");
+  assert.equal(publicValueScoreBand(75), "high");
+  assert.equal(publicValueScoreBand(90), "excellent");
 });
 
 test("materializes identities with metrics from the selected period", () => {

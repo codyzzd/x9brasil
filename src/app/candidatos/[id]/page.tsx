@@ -9,6 +9,7 @@ import {
   CalendarDays,
   ExternalLink,
   FileCheck2,
+  GitCompareArrows,
   Landmark,
   MapPin,
 } from "lucide-react";
@@ -28,8 +29,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getDeputy, rankingSnapshot } from "@/lib/data";
+import { dimensionExplanation } from "@/lib/dimension-explanations";
 import { getProfileDetails } from "@/lib/profile-data";
 import {
+  calculatePublicValueRanking,
   calculateRanking,
   calculateRankChanges,
   filterRankingCohort,
@@ -37,13 +40,22 @@ import {
   getRankingPeriod,
   materializePeriod,
   previousAnnualPeriod,
+  type PublicValueRankedDeputy,
   type RankChange,
+  type RankedDeputy,
+  type RankingIndex,
 } from "@/lib/ranking";
+import { publicValueClassificationMetadata } from "@/lib/public-value";
 import { cn } from "@/lib/utils";
 
 type PageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ uf?: string; partido?: string; periodo?: string }>;
+  searchParams: Promise<{
+    uf?: string;
+    partido?: string;
+    periodo?: string;
+    indice?: string;
+  }>;
 };
 
 export function generateStaticParams() {
@@ -65,6 +77,8 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
   if (!deputy) notFound();
 
   const context = await searchParams;
+  const index: RankingIndex =
+    context.indice === "valor-publico" ? "public-value" : "current";
   const period = getRankingPeriod(
     rankingSnapshot,
     context.periodo || rankingSnapshot.defaultPeriod,
@@ -76,7 +90,10 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
     context.partido || "all",
   );
   const ranked =
-    calculateRanking(cohort).find((item) => item.id === deputy.id) ||
+    (index === "public-value"
+      ? calculatePublicValueRanking(periodDeputies)
+      : calculateRanking(cohort)
+    ).find((item) => item.id === deputy.id) ||
     calculateRanking(periodDeputies).find((item) => item.id === deputy.id);
   if (!ranked) notFound();
   const profile = getProfileDetails(deputy.id, period.id);
@@ -85,13 +102,17 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
 
   const previousPeriod = previousAnnualPeriod(rankingSnapshot, period.id);
   const previousRanked = previousPeriod
-    ? calculateRanking(
-        filterRankingCohort(
+    ? index === "public-value"
+      ? calculatePublicValueRanking(
           materializePeriod(rankingSnapshot, previousPeriod.id),
-          context.uf || "all",
-          context.partido || "all",
-        ),
-      )
+        )
+      : calculateRanking(
+          filterRankingCohort(
+            materializePeriod(rankingSnapshot, previousPeriod.id),
+            context.uf || "all",
+            context.partido || "all",
+          ),
+        )
     : null;
   const rankChange = calculateRankChanges(
     [ranked],
@@ -102,18 +123,25 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
     .filter((item) => /^\d{4}$/.test(item.id))
     .sort((a, b) => Number(a.id) - Number(b.id))
     .map((item) => {
-      const itemRanking = calculateRanking(
-        filterRankingCohort(
-          materializePeriod(rankingSnapshot, item.id),
-          context.uf || "all",
-          context.partido || "all",
-        ),
+      const itemDeputies = materializePeriod(rankingSnapshot, item.id);
+      const itemRanking = (
+        index === "public-value"
+          ? calculatePublicValueRanking(itemDeputies)
+          : calculateRanking(
+              filterRankingCohort(
+                itemDeputies,
+                context.uf || "all",
+                context.partido || "all",
+              ),
+            )
       ).find((candidate) => candidate.id === deputy.id);
       return { period: item, ranked: itemRanking || null };
     });
   const partialAnnualPeriod = annualHistory.find((item) => item.period.partial)?.period;
+  const classificationMetadata = publicValueClassificationMetadata();
 
   const back = new URLSearchParams();
+  back.set("indice", index === "public-value" ? "valor-publico" : "atual");
   back.set("periodo", period.id);
   if (context.uf) back.set("uf", context.uf);
   if (context.partido) back.set("partido", context.partido);
@@ -177,10 +205,31 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
               </div>
               <div className="text-center sm:min-w-36">
                 <p className="text-xs text-muted-foreground">
-                  {ranked.rank ? `${ranked.rank}º na coorte` : "Sem posição"}
+                  {ranked.rank
+                    ? `${ranked.rank}º ${
+                        index === "public-value" ? "no Brasil" : "na coorte"
+                      }`
+                    : "Sem posição"}
                 </p>
-                <SemanticScore value={ranked.score} className="mt-2 w-full justify-center" />
+                <SemanticScore
+                  value={ranked.score}
+                  index={index}
+                  className="mt-2 w-full justify-center"
+                />
                 <ProfileRankTrend change={rankChange} />
+                <Link
+                  href={`/comparar?a=${encodeURIComponent(
+                    ranked.slug,
+                  )}&periodo=${encodeURIComponent(period.id)}&indice=${
+                    index === "public-value" ? "valor-publico" : "atual"
+                  }`}
+                  className={cn(
+                    buttonVariants({ variant: "outline", size: "sm" }),
+                    "mt-4 w-full",
+                  )}
+                >
+                  <GitCompareArrows className="size-3.5" /> Comparar candidato
+                </Link>
               </div>
             </CardContent>
           </Card>
@@ -189,7 +238,9 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
             <CardHeader>
               <CardTitle>Evolução anual</CardTitle>
               <CardDescription>
-                Posição e score recalculados na mesma coorte de estado e partido.
+                {index === "public-value"
+                  ? "Posição e percentis calculados nacionalmente em cada período."
+                  : "Posição e score recalculados na mesma coorte de estado e partido."}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -199,8 +250,12 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
                   <span>Posição</span>
                   <span>Score</span>
                   <span>Participação</span>
-                  <span>Produção</span>
-                  <span>Recursos</span>
+                  <span>
+                    {index === "public-value" ? "Contribuição" : "Produção"}
+                  </span>
+                  <span>
+                    {index === "public-value" ? "Eficiência" : "Recursos"}
+                  </span>
                   <span>Transparência</span>
                 </div>
                 {annualHistory.map(({ period: item, ranked: history }) => (
@@ -215,8 +270,20 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
                     <span>{history?.rank ? `${history.rank}º` : "—"}</span>
                     <span>{history?.score ?? "—"}</span>
                     <span>{history?.dimensions.participation ?? "—"}</span>
-                    <span>{history?.dimensions.production ?? "—"}</span>
-                    <span>{history?.dimensions.resources ?? "—"}</span>
+                    <span>
+                      {history
+                        ? index === "public-value"
+                          ? profileDimension(history, "contribution")
+                          : profileDimension(history, "production")
+                        : "—"}
+                    </span>
+                    <span>
+                      {history
+                        ? index === "public-value"
+                          ? profileDimension(history, "efficiency")
+                          : profileDimension(history, "resources")
+                        : "—"}
+                    </span>
                     <span>{history?.dimensions.transparency ?? "—"}</span>
                   </div>
                 ))}
@@ -288,7 +355,10 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
                     <CardHeader>
                       <CardTitle className="text-lg">Propostas apresentadas</CardTitle>
                       <CardDescription>
-                        Até 20 propostas substantivas ou de fiscalização mais recentes.
+                        Até 10 propostas substantivas ou de fiscalização mais recentes.
+                        {index === "public-value"
+                          ? " A memória de cálculo aparece quando a classificação está disponível."
+                          : ""}
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
@@ -315,6 +385,41 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
                             <p className="mt-2 text-xs text-muted-foreground">
                               {proposal.status}
                             </p>
+                            {index === "public-value" && (
+                              <div className="mt-3 rounded-md bg-muted p-3 text-xs">
+                                {proposal.publicValue ? (
+                                  <>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <Badge variant="secondary">
+                                        {proposal.publicValue.categoryLabel}
+                                      </Badge>
+                                      <span className="font-semibold tabular-nums">
+                                        {proposal.publicValue.points.toLocaleString(
+                                          "pt-BR",
+                                          { maximumFractionDigits: 2 },
+                                        )}{" "}
+                                        pontos
+                                      </span>
+                                    </div>
+                                    <p className="mt-2 text-muted-foreground">
+                                      Peso {proposal.publicValue.categoryWeight} ×
+                                      estágio{" "}
+                                      {stageLabel(proposal.publicValue.stage)} (
+                                      {proposal.publicValue.stageMultiplier
+                                        .toLocaleString("pt-BR")})
+                                    </p>
+                                    <p className="mt-1 text-muted-foreground">
+                                      {proposal.publicValue.justification}
+                                    </p>
+                                  </>
+                                ) : (
+                                  <p className="text-muted-foreground">
+                                    Classificação pendente de revisão. Esta proposta
+                                    não recebeu zero e não entrou no cálculo.
+                                  </p>
+                                )}
+                              </div>
+                            )}
                           </a>
                         ))
                       ) : (
@@ -631,25 +736,89 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
               <Card>
                 <CardHeader>
                   <CardTitle>Composição do score</CardTitle>
-                  <CardDescription>25% para cada dimensão.</CardDescription>
+                  <CardDescription>
+                    {index === "public-value"
+                      ? "50% contribuição, 25% eficiência, 15% participação e 10% transparência."
+                      : "25% para cada dimensão."}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-5">
+                  {index === "public-value" && (
+                    <DimensionScore
+                      label="Contribuição pública"
+                      value={profileDimension(ranked, "contribution")}
+                      explanation={dimensionExplanation(
+                        ranked,
+                        index,
+                        "contribution",
+                      )}
+                      index={index}
+                    />
+                  )}
+                  {index === "public-value" && (
+                    <DimensionScore
+                      label="Eficiência financeira"
+                      value={profileDimension(ranked, "efficiency")}
+                      explanation={dimensionExplanation(
+                        ranked,
+                        index,
+                        "efficiency",
+                      )}
+                      index={index}
+                    />
+                  )}
                   <DimensionScore
                     label="Participação"
                     value={ranked.dimensions.participation}
+                    explanation={dimensionExplanation(
+                      ranked,
+                      index,
+                      "participation",
+                    )}
+                    index={index}
                   />
-                  <DimensionScore
-                    label="Produção"
-                    value={ranked.dimensions.production}
-                  />
-                  <DimensionScore
-                    label="Uso de recursos"
-                    value={ranked.dimensions.resources}
-                  />
+                  {index === "current" && (
+                    <DimensionScore
+                      label="Produção"
+                      value={profileDimension(ranked, "production")}
+                      explanation={dimensionExplanation(
+                        ranked,
+                        index,
+                        "production",
+                      )}
+                      index={index}
+                    />
+                  )}
+                  {index === "current" && (
+                    <DimensionScore
+                      label="Uso de recursos"
+                      value={profileDimension(ranked, "resources")}
+                      explanation={dimensionExplanation(
+                        ranked,
+                        index,
+                        "resources",
+                      )}
+                      index={index}
+                    />
+                  )}
                   <DimensionScore
                     label="Transparência"
                     value={ranked.dimensions.transparency}
+                    explanation={dimensionExplanation(
+                      ranked,
+                      index,
+                      "transparency",
+                    )}
+                    index={index}
                   />
+                  {index === "public-value" && (
+                    <p className="rounded-md bg-muted p-3 text-xs leading-5 text-muted-foreground">
+                      {ranked.metrics.publicClassifiedProposals || 0} de{" "}
+                      {ranked.metrics.publicTotalProposals || 0} proposições
+                      classificadas. Metodologia revisada em{" "}
+                      {formatDate(classificationMetadata.reviewedAt)}.
+                    </p>
+                  )}
                   <Separator />
                   <Link
                     href="/metodologia"
@@ -668,7 +837,9 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
                     <Landmark className="size-4" /> Contexto da comparação
                   </p>
                   <p className="mt-2 text-muted-foreground text-pretty">
-                    {context.uf || context.partido
+                    {index === "public-value"
+                      ? "A posição experimental é calculada entre todos os deputados elegíveis no período."
+                      : context.uf || context.partido
                       ? `Comparado com ${cohort.length} deputados do grupo selecionado.`
                       : `Comparado com ${cohort.length} deputados em exercício no período.`}
                   </p>
@@ -733,6 +904,26 @@ function EmptyData({ text }: { text: string }) {
       {text}
     </p>
   );
+}
+
+function profileDimension(
+  deputy: RankedDeputy | PublicValueRankedDeputy,
+  key: "production" | "resources" | "contribution" | "efficiency",
+) {
+  if ("production" in deputy.dimensions) {
+    if (key === "production") return deputy.dimensions.production;
+    if (key === "resources") return deputy.dimensions.resources;
+    return null;
+  }
+  if (key === "contribution") return deputy.dimensions.contribution;
+  if (key === "efficiency") return deputy.dimensions.efficiency;
+  return null;
+}
+
+function stageLabel(stage: string) {
+  if (stage === "converted") return "transformada em norma";
+  if (stage === "advanced") return "com tramitação";
+  return "apresentada";
 }
 
 function ProfileRankTrend({ change }: { change?: RankChange }) {

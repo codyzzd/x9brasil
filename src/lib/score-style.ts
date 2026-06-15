@@ -1,4 +1,10 @@
-import { scoreBand, type ScoreBand } from "@/lib/ranking";
+import {
+  publicValueScoreBand,
+  scoreBand,
+  type PublicValueScoreBand,
+  type RankingIndex,
+  type ScoreBand,
+} from "@/lib/ranking";
 
 const styles: Record<
   ScoreBand,
@@ -40,6 +46,33 @@ const styles: Record<
   },
 };
 
-export function scoreStyle(value: number | null) {
-  return styles[scoreBand(value)];
+const publicValueStyles: Record<
+  PublicValueScoreBand,
+  (typeof styles)[ScoreBand]
+> = {
+  excellent: styles.good,
+  high: {
+    ...styles.good,
+    dot: "bg-emerald-400",
+    indicator: "bg-emerald-400",
+  },
+  medium: styles.medium,
+  low: {
+    dot: "bg-orange-500",
+    text: "text-orange-700 dark:text-orange-400",
+    soft: "bg-orange-50 dark:bg-orange-950/30",
+    border: "border-orange-200 dark:border-orange-900",
+    indicator: "bg-orange-500",
+  },
+  "very-low": styles.low,
+  unavailable: styles.unavailable,
+};
+
+export function scoreStyle(
+  value: number | null,
+  index: RankingIndex = "current",
+) {
+  return index === "public-value"
+    ? publicValueStyles[publicValueScoreBand(value)]
+    : styles[scoreBand(value)];
 }

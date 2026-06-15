@@ -13,6 +13,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
+  calculatePublicValueRanking,
   calculateRanking,
   calculateRankChanges,
   filterRankingCohort,
@@ -20,6 +21,9 @@ import {
   materializePeriod,
   previousAnnualPeriod,
   searchRankedDeputies,
+  type PublicValueRankedDeputy,
+  type RankedDeputy,
+  type RankingIndex,
   type RankingSnapshot,
 } from "@/lib/ranking";
 import { scoreStyle } from "@/lib/score-style";
@@ -28,14 +32,18 @@ import { RankingFilters, type RankingOrder } from "./ranking-filters";
 import { RankingTable } from "./ranking-table";
 
 const PAGE_SIZE = 20;
+type AnyRankedDeputy = RankedDeputy | PublicValueRankedDeputy;
+export type RankingDirection = "asc" | "desc";
 
 export function RankingBrowser({
   snapshot,
+  initialIndex = "current",
   initialState = "all",
   initialParty = "all",
   initialPeriod,
 }: {
   snapshot: RankingSnapshot;
+  initialIndex?: RankingIndex;
   initialState?: string;
   initialParty?: string;
   initialPeriod: string;
@@ -43,10 +51,12 @@ export function RankingBrowser({
   const router = useRouter();
   const pathname = usePathname();
   const [query, setQuery] = useState("");
+  const [index, setIndex] = useState<RankingIndex>(initialIndex);
   const [period, setPeriod] = useState(initialPeriod);
   const [state, setState] = useState(initialState);
   const [party, setParty] = useState(initialParty);
   const [order, setOrder] = useState<RankingOrder>("score");
+  const [direction, setDirection] = useState<RankingDirection>("desc");
   const [visible, setVisible] = useState(PAGE_SIZE);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -75,27 +85,40 @@ export function RankingBrowser({
     [party, periodDeputies, state],
   );
 
-  const ranked = useMemo(() => {
-    const result = calculateRanking(cohort);
-    if (order === "score") return result;
+  const ranked = useMemo<AnyRankedDeputy[]>(() => {
+    const result: AnyRankedDeputy[] =
+      index === "public-value"
+        ? calculatePublicValueRanking(periodDeputies).filter(
+            (deputy) =>
+              (state === "all" || deputy.state === state) &&
+              (party === "all" || deputy.party === party),
+          )
+        : calculateRanking(cohort);
     return [...result].sort((a, b) => {
       const difference =
-        (b.dimensions[order] ?? -1) - (a.dimensions[order] ?? -1);
-      return difference || a.name.localeCompare(b.name, "pt-BR");
+        order === "name"
+          ? a.name.localeCompare(b.name, "pt-BR")
+          : dimensionValue(a, order) - dimensionValue(b, order);
+      const directed = direction === "asc" ? difference : -difference;
+      return directed || a.name.localeCompare(b.name, "pt-BR");
     });
-  }, [cohort, order]);
+  }, [cohort, direction, index, order, party, periodDeputies, state]);
 
   const previousPeriod = previousAnnualPeriod(snapshot, period);
   const previousRanked = useMemo(() => {
     if (!previousPeriod) return null;
+    const previousDeputies = materializePeriod(snapshot, previousPeriod.id);
+    if (index === "public-value") {
+      return calculatePublicValueRanking(previousDeputies).filter(
+        (deputy) =>
+          (state === "all" || deputy.state === state) &&
+          (party === "all" || deputy.party === party),
+      );
+    }
     return calculateRanking(
-      filterRankingCohort(
-        materializePeriod(snapshot, previousPeriod.id),
-        state,
-        party,
-      ),
+      filterRankingCohort(previousDeputies, state, party),
     );
-  }, [party, previousPeriod, snapshot, state]);
+  }, [index, party, previousPeriod, snapshot, state]);
   const rankChanges = useMemo(
     () =>
       calculateRankChanges(
@@ -120,11 +143,12 @@ export function RankingBrowser({
         );
   const contextQuery = useMemo(() => {
     const context = new URLSearchParams();
+    context.set("indice", index === "public-value" ? "valor-publico" : "atual");
     context.set("periodo", period);
     if (state !== "all") context.set("uf", state);
     if (party !== "all") context.set("partido", party);
     return `?${context.toString()}`;
-  }, [party, period, state]);
+  }, [index, party, period, state]);
 
   useEffect(() => {
     router.replace(`${pathname}${contextQuery}`, { scroll: false });
@@ -132,14 +156,17 @@ export function RankingBrowser({
 
   const reset = () => {
     setPeriod(snapshot.defaultPeriod);
+    setIndex("current");
     setState("all");
     setParty("all");
     setOrder("score");
+    setDirection("desc");
     setVisible(PAGE_SIZE);
   };
 
   const filters = (
     <RankingFilters
+      index={index}
       period={period}
       state={state}
       party={party}
@@ -152,6 +179,12 @@ export function RankingBrowser({
       }))}
       states={states}
       parties={parties}
+      onIndexChange={(value) => {
+        setIndex(value);
+        setOrder("score");
+        setDirection("desc");
+        setVisible(PAGE_SIZE);
+      }}
       onPeriodChange={(value) => {
         setPeriod(value);
         setState("all");
@@ -166,7 +199,11 @@ export function RankingBrowser({
         setParty(value);
         setVisible(PAGE_SIZE);
       }}
-      onOrderChange={setOrder}
+      onOrderChange={(value) => {
+        setOrder(value);
+        setDirection(value === "name" ? "asc" : "desc");
+        setVisible(PAGE_SIZE);
+      }}
       onReset={reset}
     />
   );
@@ -219,6 +256,7 @@ export function RankingBrowser({
             value={average ?? "N/D"}
             suffix="/100"
             score={average}
+            index={index}
           />
           <Summary
             label="Atualizado em"
@@ -227,6 +265,17 @@ export function RankingBrowser({
             )}
           />
         </div>
+
+        {index === "public-value" && (
+          <div className="mb-5 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
+            <p className="font-medium">Valor Público experimental</p>
+            <p className="mt-1 text-xs leading-5">
+              A nota usa contribuição temática classificada, eficiência por gasto,
+              participação e cobertura de dados. Propostas pendentes de revisão não
+              recebem zero e reduzem a cobertura disponível.
+            </p>
+          </div>
+        )}
 
         <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
           <div>
@@ -250,6 +299,20 @@ export function RankingBrowser({
 
         <RankingTable
           deputies={searched.slice(0, visible)}
+          index={index}
+          order={order}
+          direction={direction}
+          onOrderChange={(value) => {
+            if (value === order) {
+              setDirection((current) =>
+                current === "desc" ? "asc" : "desc",
+              );
+            } else {
+              setOrder(value);
+              setDirection(value === "name" ? "asc" : "desc");
+            }
+            setVisible(PAGE_SIZE);
+          }}
           contextQuery={contextQuery}
           rankChanges={rankChanges}
         />
@@ -268,18 +331,40 @@ export function RankingBrowser({
   );
 }
 
+function dimensionValue(deputy: AnyRankedDeputy, order: RankingOrder) {
+  if (order === "score") return deputy.score ?? -1;
+  if (order === "name") return 0;
+  if (order === "participation") return deputy.dimensions.participation ?? -1;
+  if (order === "transparency") return deputy.dimensions.transparency;
+  if (order === "production" && "production" in deputy.dimensions) {
+    return deputy.dimensions.production ?? -1;
+  }
+  if (order === "resources" && "resources" in deputy.dimensions) {
+    return deputy.dimensions.resources ?? -1;
+  }
+  if (order === "contribution" && "contribution" in deputy.dimensions) {
+    return deputy.dimensions.contribution ?? -1;
+  }
+  if (order === "efficiency" && "efficiency" in deputy.dimensions) {
+    return deputy.dimensions.efficiency ?? -1;
+  }
+  return -1;
+}
+
 function Summary({
   label,
   value,
   suffix,
   score,
+  index = "current",
 }: {
   label: string;
   value: string | number;
   suffix?: string;
   score?: number | null;
+  index?: RankingIndex;
 }) {
-  const style = score === undefined ? null : scoreStyle(score);
+  const style = score === undefined ? null : scoreStyle(score, index);
   return (
     <div
       className={cn(

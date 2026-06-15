@@ -11,6 +11,14 @@ import type {
   RankingSnapshot,
   RawMetrics,
 } from "../src/lib/ranking";
+import {
+  PUBLIC_VALUE_CATEGORIES,
+  classifyProposal,
+  proposalContributionPoints,
+  proposalStageMultiplier,
+  publicValueClassificationMetadata,
+  type ProposalStage,
+} from "../src/lib/public-value";
 
 const LEGISLATURE = 57;
 const PERIOD_START = "2023-02-01";
@@ -23,6 +31,10 @@ const YEARS = Array.from(
 const OUTPUT = new URL("../src/data/ranking-snapshot.json", import.meta.url);
 const PROFILE_OUTPUT = new URL(
   "../src/data/profile-details.json",
+  import.meta.url,
+);
+const PENDING_OUTPUT = new URL(
+  "../src/data/public-value-classification-pending.json",
   import.meta.url,
 );
 const CHAMBER_API = "https://dadosabertos.camara.leg.br/api/v2";
@@ -794,6 +806,7 @@ function buildPeriodDeputy(
     campaignReceiptsAvailable: false,
     campaignExpensesAvailable: false,
     accountsStatusAvailable: false,
+    ...publicValueMetrics(period),
   };
   return {
     id: item.deputy.id,
@@ -803,6 +816,31 @@ function buildPeriodDeputy(
     officeEnd: period.officeEnd,
     daysInOffice: period.daysInOffice,
     metrics,
+  };
+}
+
+function proposalStage(period: PeriodAccumulator, proposalId: string): ProposalStage {
+  if (period.convertedProposals.has(proposalId)) return "converted";
+  if (period.advancedProposals.has(proposalId)) return "advanced";
+  return "presented";
+}
+
+function publicValueMetrics(period: PeriodAccumulator) {
+  let points = 0;
+  let classified = 0;
+  for (const proposal of period.proposals.values()) {
+    const classification = classifyProposal(proposal.id, proposal.summary);
+    if (!classification) continue;
+    classified += 1;
+    points += proposalContributionPoints(
+      classification,
+      proposalStage(period, proposal.id),
+    );
+  }
+  return {
+    publicContributionPoints: classified > 0 ? Number(points.toFixed(2)) : null,
+    publicClassifiedProposals: classified,
+    publicTotalProposals: period.proposals.size,
   };
 }
 
@@ -822,6 +860,27 @@ function buildProfilePeriod(
     largestExpenses: [...period.largestExpenses],
     proposals: [...period.proposals.values()]
       .sort((a, b) => b.date.localeCompare(a.date))
+      .map((proposal) => {
+        const classification = classifyProposal(proposal.id, proposal.summary);
+        if (!classification) return { ...proposal, publicValue: null };
+        const stage = proposalStage(period, proposal.id);
+        const category = PUBLIC_VALUE_CATEGORIES[classification.category];
+        return {
+          ...proposal,
+          publicValue: {
+            category: classification.category,
+            categoryLabel: category.label,
+            categoryWeight: category.weight,
+            confidence: classification.confidence,
+            justification: classification.justification,
+            source: classification.source,
+            stage,
+            stageMultiplier: proposalStageMultiplier(stage),
+            points: proposalContributionPoints(classification, stage),
+            methodologyVersion: classification.methodologyVersion,
+          },
+        };
+      })
       .slice(0, 10),
     amendments: [...period.amendments]
       .sort(
@@ -831,6 +890,40 @@ function buildProfilePeriod(
           (a.transferredValue + a.proposedValue),
       )
       .slice(0, 10),
+  };
+}
+
+function buildClassificationPending(
+  accumulators: Map<number, DeputyAccumulator>,
+) {
+  const proposals = new Map<
+    string,
+    {
+      id: string;
+      type: string;
+      number: string;
+      year: string;
+      summary: string;
+      url: string;
+    }
+  >();
+  for (const accumulator of accumulators.values()) {
+    for (const period of accumulator.periods.values()) {
+      for (const proposal of period.proposals.values()) {
+        if (!classifyProposal(proposal.id, proposal.summary)) {
+          proposals.set(proposal.id, proposal);
+        }
+      }
+    }
+  }
+  const metadata = publicValueClassificationMetadata();
+  return {
+    generatedAt: new Date().toISOString(),
+    methodologyVersion: metadata.methodologyVersion,
+    total: proposals.size,
+    proposals: [...proposals.values()].sort(
+      (a, b) => Number(b.year) - Number(a.year) || a.id.localeCompare(b.id),
+    ),
   };
 }
 
@@ -917,14 +1010,22 @@ async function main() {
   await loadAmendments(accumulators);
   const snapshot = buildSnapshot(accumulators);
   const profileDetails = buildProfileDetails(accumulators);
+  const classificationPending = buildClassificationPending(accumulators);
   await mkdir(new URL("../src/data", import.meta.url), { recursive: true });
   await writeFile(OUTPUT, `${JSON.stringify(snapshot, null, 2)}\n`);
   await writeFile(
     PROFILE_OUTPUT,
     `${JSON.stringify(profileDetails)}\n`,
   );
+  await writeFile(
+    PENDING_OUTPUT,
+    `${JSON.stringify(classificationPending, null, 2)}\n`,
+  );
   console.log(
     `Snapshot v2 salvo com ${snapshot.deputies.length} parlamentares e ${snapshot.periods.length} períodos`,
+  );
+  console.log(
+    `${classificationPending.total} proposições aguardando revisão de classificação`,
   );
 }
 

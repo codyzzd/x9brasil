@@ -9,10 +9,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { RankingIndex } from "@/lib/ranking";
 
-export type RankingOrder = "score" | "participation" | "production" | "resources";
+export type RankingOrder =
+  | "score"
+  | "name"
+  | "participation"
+  | "production"
+  | "resources"
+  | "contribution"
+  | "efficiency"
+  | "transparency";
 
 export function RankingFilters({
+  index,
   period,
   state,
   party,
@@ -21,11 +31,13 @@ export function RankingFilters({
   states,
   parties,
   onPeriodChange,
+  onIndexChange,
   onStateChange,
   onPartyChange,
   onOrderChange,
   onReset,
 }: {
+  index: RankingIndex;
   period: string;
   state: string;
   party: string;
@@ -33,6 +45,7 @@ export function RankingFilters({
   periods: Array<{ id: string; label: string; partial: boolean; end: string }>;
   states: string[];
   parties: string[];
+  onIndexChange: (value: RankingIndex) => void;
   onPeriodChange: (value: string) => void;
   onStateChange: (value: string) => void;
   onPartyChange: (value: string) => void;
@@ -47,6 +60,28 @@ export function RankingFilters({
           <RotateCcw className="size-3.5" /> Limpar
         </Button>
       </div>
+      <FilterField label="Índice">
+        <Select
+          value={index}
+          onValueChange={(value) =>
+            onIndexChange((value ?? "current") as RankingIndex)
+          }
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue>
+              {index === "public-value"
+                ? "Valor Público (experimental)"
+                : "Índice atual"}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="current">Índice atual</SelectItem>
+            <SelectItem value="public-value">
+              Valor Público (experimental)
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </FilterField>
       <FilterField label="Período">
         <Select
           value={period}
@@ -105,28 +140,51 @@ export function RankingFilters({
         >
           <SelectTrigger className="w-full">
             <SelectValue>
-              {{
-                score: "Score geral",
-                participation: "Participação",
-                production: "Produção",
-                resources: "Uso de recursos",
-              }[order]}
+              {orderLabel(order, index)}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="score">Score geral</SelectItem>
+            <SelectItem value="score">
+              {index === "public-value" ? "Valor Público" : "Score geral"}
+            </SelectItem>
+            <SelectItem value="name">Nome</SelectItem>
             <SelectItem value="participation">Participação</SelectItem>
-            <SelectItem value="production">Produção</SelectItem>
-            <SelectItem value="resources">Uso de recursos</SelectItem>
+            {index === "current" ? (
+              <>
+                <SelectItem value="production">Produção</SelectItem>
+                <SelectItem value="resources">Uso de recursos</SelectItem>
+              </>
+            ) : (
+              <>
+                <SelectItem value="contribution">Contribuição pública</SelectItem>
+                <SelectItem value="efficiency">Eficiência financeira</SelectItem>
+              </>
+            )}
+            <SelectItem value="transparency">Transparência</SelectItem>
           </SelectContent>
         </Select>
       </FilterField>
       <div className="rounded-lg bg-muted p-4 text-xs leading-5 text-muted-foreground">
-        Estado e partido recalculam as posições dentro do grupo selecionado. A busca
-        por nome apenas localiza o parlamentar e não muda sua nota.
+        {index === "current"
+          ? "Estado e partido recalculam as posições dentro do grupo selecionado."
+          : "No índice experimental, posições e notas são nacionais; estado e partido apenas filtram a lista."}{" "}
+        A busca por nome apenas localiza o parlamentar.
       </div>
     </div>
   );
+}
+
+function orderLabel(order: RankingOrder, index: RankingIndex) {
+  return {
+    score: index === "public-value" ? "Valor Público" : "Score geral",
+    name: "Nome",
+    participation: "Participação",
+    production: "Produção",
+    resources: "Uso de recursos",
+    contribution: "Contribuição pública",
+    efficiency: "Eficiência financeira",
+    transparency: "Transparência",
+  }[order];
 }
 
 function FilterField({

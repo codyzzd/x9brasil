@@ -1,4 +1,8 @@
-import { scoreLabel } from "@/lib/ranking";
+import {
+  publicValueScoreLabel,
+  scoreLabel,
+  type RankingIndex,
+} from "@/lib/ranking";
 import { scoreStyle } from "@/lib/score-style";
 import { cn } from "@/lib/utils";
 
@@ -6,12 +10,14 @@ export function SemanticScore({
   value,
   compact = false,
   className,
+  index = "current",
 }: {
   value: number | null;
   compact?: boolean;
   className?: string;
+  index?: RankingIndex;
 }) {
-  const style = scoreStyle(value);
+  const style = scoreStyle(value, index);
 
   return (
     <div
@@ -37,7 +43,9 @@ export function SemanticScore({
           {value ?? "—"}
         </p>
         <p className={cn("mt-1 text-xs font-medium", style.text)}>
-          {scoreLabel(value)}
+          {index === "public-value"
+            ? publicValueScoreLabel(value)
+            : scoreLabel(value)}
         </p>
       </div>
     </div>

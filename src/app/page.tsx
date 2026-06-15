@@ -12,9 +12,16 @@ import {
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ uf?: string; partido?: string; periodo?: string }>;
+  searchParams: Promise<{
+    uf?: string;
+    partido?: string;
+    periodo?: string;
+    indice?: string;
+  }>;
 }) {
   const context = await searchParams;
+  const initialIndex =
+    context.indice === "valor-publico" ? "public-value" : "current";
   const initialPeriod = resolvePeriod(context.periodo);
   const { states, parties } = getPeriodFacets(initialPeriod.id);
   const initialState = context.uf && states.includes(context.uf) ? context.uf : "all";
@@ -47,13 +54,26 @@ export default async function Home({
           </div>
           <div className="mb-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
             <span className="font-medium text-muted-foreground">Escala:</span>
-            <Legend color="bg-red-500" label="Baixo · 0–49" />
-            <Legend color="bg-amber-500" label="Médio · 50–64" />
-            <Legend color="bg-emerald-500" label="Bom · 65–100" />
+            {initialIndex === "public-value" ? (
+              <>
+                <Legend color="bg-red-500" label="Muito baixo · 0–39" />
+                <Legend color="bg-orange-500" label="Baixo · 40–59" />
+                <Legend color="bg-amber-500" label="Médio · 60–74" />
+                <Legend color="bg-emerald-400" label="Alto · 75–89" />
+                <Legend color="bg-emerald-500" label="Excelente · 90–100" />
+              </>
+            ) : (
+              <>
+                <Legend color="bg-red-500" label="Baixo · 0–49" />
+                <Legend color="bg-amber-500" label="Médio · 50–64" />
+                <Legend color="bg-emerald-500" label="Bom · 65–100" />
+              </>
+            )}
             <Legend color="bg-muted-foreground" label="Dados indisponíveis" />
           </div>
           <RankingBrowser
             snapshot={rankingSnapshot}
+            initialIndex={initialIndex}
             initialState={initialState}
             initialParty={initialParty}
             initialPeriod={initialPeriod.id}

@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "test": "tsx --test src/**/*.test.ts",
-    "data:sync": "tsx scripts/sync-data.ts"
+    "data:sync": "tsx scripts/sync-data.ts",
+    "data:public-value:rebuild": "tsx scripts/rebuild-public-value.ts",
+    "data:classifications:pending": "tsx scripts/generate-classification-pending.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

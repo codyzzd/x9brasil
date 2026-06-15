@@ -13,6 +13,7 @@ import {
 
 const links = [
   { href: "/", label: "Ranking" },
+  { href: "/comparar", label: "Comparar" },
   { href: "/metodologia", label: "Metodologia" },
   { href: "/fontes", label: "Fontes" },
 ];

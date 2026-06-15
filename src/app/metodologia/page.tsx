@@ -10,6 +10,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { SCORE_WEIGHTS } from "@/lib/ranking";
+import {
+  PUBLIC_VALUE_WEIGHTS,
+  publicValueClassificationMetadata,
+} from "@/lib/public-value";
 
 export const metadata: Metadata = {
   title: "Metodologia",
@@ -44,6 +48,7 @@ const dimensions = [
 ] as const;
 
 export default function MethodologyPage() {
+  const publicValueMetadata = publicValueClassificationMetadata();
   return (
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
@@ -170,6 +175,39 @@ export default function MethodologyPage() {
               </CardContent>
             </Card>
           </div>
+
+          <Card className="mt-10 border-blue-200 dark:border-blue-900">
+            <CardHeader>
+              <CardTitle>Valor Público experimental</CardTitle>
+              <CardDescription>
+                Índice paralelo; não substitui a metodologia principal.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5 text-sm leading-6">
+              <pre className="overflow-x-auto rounded-lg bg-muted p-4 text-sm">
+                score = contribuição × {PUBLIC_VALUE_WEIGHTS.contribution}
+                {"\n"}      + eficiência × {PUBLIC_VALUE_WEIGHTS.efficiency}
+                {"\n"}      + participação × {PUBLIC_VALUE_WEIGHTS.participation}
+                {"\n"}      + transparência × {PUBLIC_VALUE_WEIGHTS.transparency}
+              </pre>
+              <Method
+                title="Contribuição pública"
+                text="Cada proposição classificada recebe peso temático multiplicado pelo estágio: 0,25 quando apresentada, 0,75 quando possui tramitação e 1 quando transformada em norma. Nesta versão, somente a autoria principal é considerada."
+              />
+              <Method
+                title="Eficiência financeira"
+                text="Razão entre pontos de contribuição e despesas da cota, convertida em percentil nacional do mesmo período. Gastar mais não reduz a nota isoladamente; reduz quando a contribuição não acompanha o gasto."
+              />
+              <Method
+                title="Cobertura e revisão"
+                text={`Classificações ambíguas ficam pendentes e não recebem zero. A taxonomia está na versão ${publicValueMetadata.methodologyVersion}, revisada em ${new Intl.DateTimeFormat("pt-BR").format(new Date(`${publicValueMetadata.reviewedAt}T12:00:00`))}.`}
+              />
+              <Method
+                title="Comparação"
+                text="Notas e posições são calculadas nacionalmente. Estado e partido apenas filtram a visualização e não alteram o resultado experimental."
+              />
+            </CardContent>
+          </Card>
         </div>
       </main>
       <SiteFooter />
