@@ -86,6 +86,11 @@ export function buildComparisonCandidate(
               value: ranked.dimensions.contribution,
             },
             {
+              key: "publicVotes",
+              label: "Votos públicos",
+              value: ranked.dimensions.publicVotes,
+            },
+            {
               key: "efficiency",
               label: "Eficiência financeira",
               value: ranked.dimensions.efficiency,

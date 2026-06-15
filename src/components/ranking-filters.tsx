@@ -18,6 +18,7 @@ export type RankingOrder =
   | "production"
   | "resources"
   | "contribution"
+  | "publicVotes"
   | "efficiency"
   | "transparency";
 
@@ -186,6 +187,7 @@ export function RankingFilters({
             ) : (
               <>
                 <SelectItem value="contribution">Contribuição pública</SelectItem>
+                <SelectItem value="publicVotes">Votos públicos</SelectItem>
                 <SelectItem value="efficiency">Eficiência financeira</SelectItem>
               </>
             )}
@@ -221,6 +223,7 @@ function orderLabel(order: RankingOrder, index: RankingIndex) {
     production: "Produção",
     resources: "Uso de recursos",
     contribution: "Contribuição pública",
+    publicVotes: "Votos públicos",
     efficiency: "Eficiência financeira",
     transparency: "Transparência",
   }[order];

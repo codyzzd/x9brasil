@@ -512,12 +512,12 @@ function ComparisonSections({
         leftName={candidateA.name}
         rightName={candidateB.name}
         rows={[
-          metric("Presenças em sessões", candidateA.activity.plenaryAttendances, candidateB.activity.plenaryAttendances),
-          metric("Votos nominais", candidateA.activity.nominalVotes, candidateB.activity.nominalVotes),
-          metric("Propostas substantivas", candidateA.activity.substantiveProposals, candidateB.activity.substantiveProposals),
-          metric("Propostas de fiscalização", candidateA.activity.oversightProposals, candidateB.activity.oversightProposals),
-          metric("Propostas que avançaram", candidateA.activity.advancedProposals, candidateB.activity.advancedProposals),
-          metric("Transformadas em norma", candidateA.activity.convertedProposals, candidateB.activity.convertedProposals),
+          metric("Presenças em sessões", candidateA.activity.plenaryAttendances, candidateB.activity.plenaryAttendances, "number", "higher"),
+          metric("Votos nominais", candidateA.activity.nominalVotes, candidateB.activity.nominalVotes, "number", "higher"),
+          metric("Propostas substantivas", candidateA.activity.substantiveProposals, candidateB.activity.substantiveProposals, "number", "higher"),
+          metric("Propostas de fiscalização", candidateA.activity.oversightProposals, candidateB.activity.oversightProposals, "number", "higher"),
+          metric("Propostas que avançaram", candidateA.activity.advancedProposals, candidateB.activity.advancedProposals, "number", "higher"),
+          metric("Transformadas em norma", candidateA.activity.convertedProposals, candidateB.activity.convertedProposals, "number", "higher"),
         ]}
       />
 
@@ -527,10 +527,10 @@ function ComparisonSections({
         leftName={candidateA.name}
         rightName={candidateB.name}
         rows={[
-          metric("Total gasto", candidateA.expenses.total, candidateB.expenses.total, "currency"),
-          metric("Média por mês em exercício", candidateA.expenses.monthlyAverage, candidateB.expenses.monthlyAverage, "currency"),
+          metric("Total gasto", candidateA.expenses.total, candidateB.expenses.total, "currency", "lower"),
+          metric("Média por mês em exercício", candidateA.expenses.monthlyAverage, candidateB.expenses.monthlyAverage, "currency", "lower"),
           metric("Documentos publicados", candidateA.expenses.documents, candidateB.expenses.documents),
-          metric("Concentração por fornecedor", candidateA.expenses.supplierConcentration, candidateB.expenses.supplierConcentration, "ratio"),
+          metric("Concentração por fornecedor", candidateA.expenses.supplierConcentration, candidateB.expenses.supplierConcentration, "ratio", "lower"),
           textMetric("Principal categoria", candidateA.expenses.topCategory, candidateB.expenses.topCategory),
           textMetric("Maior fornecedor", candidateA.expenses.topSupplier, candidateB.expenses.topSupplier),
         ]}
@@ -578,6 +578,7 @@ type MetricRow = {
   left: number | string | null;
   right: number | string | null;
   format: "number" | "currency" | "ratio" | "text";
+  preference: "higher" | "lower" | "neutral";
 };
 
 function MetricSection({
@@ -608,6 +609,7 @@ function MetricSection({
           <MetricValue
             value={row.left}
             format={row.format}
+            bad={isWorseValue(row.left, row.right, row.preference)}
             className="row-start-2 text-right md:row-auto"
           />
           <div className="col-span-2 row-start-1 text-center md:col-span-1 md:col-start-2 md:row-auto">
@@ -631,6 +633,7 @@ function MetricSection({
           <MetricValue
             value={row.right}
             format={row.format}
+            bad={isWorseValue(row.right, row.left, row.preference)}
             className="row-start-2 text-right md:row-auto md:text-left"
           />
         </div>
@@ -662,16 +665,19 @@ function ComparisonSection({
 function MetricValue({
   value,
   format,
+  bad = false,
   className,
 }: {
   value: number | string | null;
   format: MetricRow["format"];
+  bad?: boolean;
   className?: string;
 }) {
   return (
     <p
       className={cn(
         "min-w-0 text-base font-semibold tabular-nums text-pretty",
+        bad && "text-red-700 dark:text-red-400",
         className,
       )}
     >
@@ -760,8 +766,9 @@ function metric(
   left: number | null,
   right: number | null,
   format: MetricRow["format"] = "number",
+  preference: MetricRow["preference"] = "neutral",
 ): MetricRow {
-  return { label, left, right, format };
+  return { label, left, right, format, preference };
 }
 
 function textMetric(
@@ -769,7 +776,23 @@ function textMetric(
   left: string | null,
   right: string | null,
 ): MetricRow {
-  return { label, left, right, format: "text" };
+  return { label, left, right, format: "text", preference: "neutral" };
+}
+
+function isWorseValue(
+  value: number | string | null,
+  other: number | string | null,
+  preference: MetricRow["preference"],
+) {
+  if (
+    preference === "neutral" ||
+    typeof value !== "number" ||
+    typeof other !== "number" ||
+    value === other
+  ) {
+    return false;
+  }
+  return preference === "higher" ? value < other : value > other;
 }
 
 function formatMetricValue(

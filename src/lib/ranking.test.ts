@@ -53,6 +53,12 @@ const deputy = (
     campaignReceiptsAvailable: true,
     campaignExpensesAvailable: true,
     accountsStatusAvailable: true,
+    publicVotePositivePoints: id * 8,
+    publicVoteNegativePenalties: id,
+    publicVoteAbsencePenalties: 0,
+    publicVotesAnalyzed: 3,
+    publicVoteAverageConfidence: 0.8,
+    publicVoteScore: id * 7,
     ...overrides,
   },
 });
@@ -68,9 +74,10 @@ test("uses equal weights for all score dimensions", () => {
 
 test("public value index uses the experimental weights", () => {
   assert.deepEqual(PUBLIC_VALUE_WEIGHTS, {
-    contribution: 0.5,
-    efficiency: 0.25,
-    participation: 0.15,
+    contribution: 0.4,
+    publicVotes: 0.2,
+    efficiency: 0.2,
+    participation: 0.1,
     transparency: 0.1,
   });
 });
@@ -137,6 +144,26 @@ test("unclassified proposals do not become zero contribution", () => {
   ]);
   const pending = result.find((item) => item.id === 1);
   assert.equal(pending?.dimensions.contribution, null);
+  assert.equal(pending?.score, null);
+});
+
+test("unanalyzed public votes do not become zero public-vote score", () => {
+  const result = calculatePublicValueRanking([
+    deputy(1, {
+      publicContributionPoints: 10,
+      publicClassifiedProposals: 2,
+      publicTotalProposals: 2,
+      publicVoteScore: null,
+      publicVotesAnalyzed: 0,
+    }),
+    deputy(2, {
+      publicContributionPoints: 10,
+      publicClassifiedProposals: 2,
+      publicTotalProposals: 2,
+    }),
+  ]);
+  const pending = result.find((item) => item.id === 1);
+  assert.equal(pending?.dimensions.publicVotes, null);
   assert.equal(pending?.score, null);
 });
 

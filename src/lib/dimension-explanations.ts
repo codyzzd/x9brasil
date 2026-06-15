@@ -16,6 +16,7 @@ export type DimensionKey =
   | "production"
   | "resources"
   | "contribution"
+  | "publicVotes"
   | "efficiency"
   | "transparency";
 
@@ -35,6 +36,9 @@ export function dimensionExplanation(
   if (dimension === "contribution") {
     return contributionExplanation(deputy.metrics);
   }
+  if (dimension === "publicVotes") {
+    return publicVotesExplanation(deputy.metrics);
+  }
   if (dimension === "efficiency") {
     return efficiencyExplanation(deputy.metrics);
   }
@@ -42,6 +46,30 @@ export function dimensionExplanation(
     return productionExplanation(deputy.metrics);
   }
   return resourcesExplanation(deputy.metrics);
+}
+
+function publicVotesExplanation(metrics: RawMetrics): DimensionExplanation {
+  return {
+    title: "Votos públicos",
+    description:
+      "Percentil nacional do saldo auditável de votos nominais classificados por impacto público, ajustado pelos meses de mandato.",
+    details: [
+      `${formatDecimal(metrics.publicVoteScore)} pontos líquidos em ${formatInteger(
+        metrics.publicVotesAnalyzed,
+      )} votos analisados.`,
+      `${formatDecimal(metrics.publicVotePositivePoints)} pontos positivos; ${formatDecimal(
+        metrics.publicVoteNegativePenalties,
+      )} em penalidades por voto e ${formatDecimal(
+        metrics.publicVoteAbsencePenalties,
+      )} por ausência.`,
+      `Confiança média: ${formatPercent(
+        metrics.publicVoteAverageConfidence === null ||
+          metrics.publicVoteAverageConfidence === undefined
+          ? null
+          : metrics.publicVoteAverageConfidence * 100,
+      )}.`,
+    ],
+  };
 }
 
 export function publicValueEfficiencyPerHundredThousand(metrics: RawMetrics) {

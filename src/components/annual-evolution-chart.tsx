@@ -55,8 +55,6 @@ export function AnnualEvolutionChart({
     point.rank === null ? [] : [point.rank],
   );
   const rankMax = Math.max(10, ...ranks);
-  const activePoint =
-    activeIndex === null ? null : data[activeIndex] ?? null;
   const activeX =
     activeIndex === null ? 0 : xPosition(activeIndex, data.length);
 
@@ -262,7 +260,7 @@ export function AnnualEvolutionChart({
               <button
                 key={`interaction-${point.year}`}
                 type="button"
-                className="absolute rounded-sm bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                className="group/year absolute rounded-sm bg-transparent text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                 style={{
                   left: `${(left / WIDTH) * 100}%`,
                   top: `${(MARGIN.top / HEIGHT) * 100}%`,
@@ -279,51 +277,48 @@ export function AnnualEvolutionChart({
                 onClick={() => setActiveIndex(index)}
                 onFocus={() => setActiveIndex(index)}
                 onBlur={() => setActiveIndex(null)}
-              />
+              >
+                <span
+                  className={cn(
+                    "pointer-events-none absolute top-2 z-10 w-56 rounded-lg bg-foreground p-3 text-background opacity-0 shadow-lg transition-opacity duration-150 group-hover/year:opacity-100 group-focus/year:opacity-100",
+                    index === 0
+                      ? "left-0"
+                      : index === data.length - 1
+                        ? "right-0"
+                        : "left-1/2 -translate-x-1/2",
+                  )}
+                  role="tooltip"
+                >
+                  <span className="mb-2 flex items-center justify-between gap-3">
+                    <span className="font-semibold tabular-nums">
+                      {point.year}
+                      {point.partial ? "*" : ""}
+                    </span>
+                    <span className="text-xs opacity-70 tabular-nums">
+                      {formatRank(point.rank)}
+                    </span>
+                  </span>
+                  <span className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 text-xs tabular-nums">
+                    {series.map((item) => (
+                      <span className="contents" key={item.key}>
+                        <span className="flex items-center gap-2 opacity-80">
+                          <span
+                            className="size-2 rounded-full"
+                            style={{ backgroundColor: item.color }}
+                            aria-hidden="true"
+                          />
+                          {item.label}
+                        </span>
+                        <span className="font-medium">
+                          {formatValue(point[item.key])}
+                        </span>
+                      </span>
+                    ))}
+                  </span>
+                </span>
+              </button>
             );
           })}
-
-          {activePoint && (
-            <div
-              className={cn(
-                "pointer-events-none absolute top-7 z-10 w-56 rounded-lg bg-foreground p-3 text-background shadow-lg",
-                activeIndex === 0
-                  ? "translate-x-0"
-                  : activeIndex === data.length - 1
-                    ? "-translate-x-full"
-                    : "-translate-x-1/2",
-              )}
-              style={{ left: `${(activeX / WIDTH) * 100}%` }}
-              role="tooltip"
-            >
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <p className="font-semibold tabular-nums">
-                  {activePoint.year}
-                  {activePoint.partial ? "*" : ""}
-                </p>
-                <p className="text-xs opacity-70 tabular-nums">
-                  {formatRank(activePoint.rank)}
-                </p>
-              </div>
-              <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 text-xs tabular-nums">
-                {series.map((item) => (
-                  <div className="contents" key={item.key}>
-                    <span className="flex items-center gap-2 opacity-80">
-                      <span
-                        className="size-2 rounded-full"
-                        style={{ backgroundColor: item.color }}
-                        aria-hidden="true"
-                      />
-                      {item.label}
-                    </span>
-                    <span className="font-medium">
-                      {formatValue(activePoint[item.key])}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>

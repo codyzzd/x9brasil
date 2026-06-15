@@ -48,6 +48,12 @@ const record: DeputyRecord = {
     publicContributionPoints: 12,
     publicClassifiedProposals: 2,
     publicTotalProposals: 2,
+    publicVotePositivePoints: 12,
+    publicVoteNegativePenalties: 2,
+    publicVoteAbsencePenalties: 0,
+    publicVotesAnalyzed: 3,
+    publicVoteAverageConfidence: 0.8,
+    publicVoteScore: 10,
   },
 };
 
@@ -129,6 +135,7 @@ test("comparison preserves the public value ranking score and dimensions", () =>
     comparison.dimensions.map(({ value }) => value),
     [
       ranked.dimensions.contribution,
+      ranked.dimensions.publicVotes,
       ranked.dimensions.efficiency,
       ranked.dimensions.participation,
       ranked.dimensions.transparency,

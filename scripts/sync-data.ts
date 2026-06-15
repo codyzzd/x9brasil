@@ -13,10 +13,16 @@ import type {
 } from "../src/lib/ranking";
 import {
   PUBLIC_VALUE_CATEGORIES,
+  buildPublicVoteRecord,
+  classifyPublicVote,
   classifyProposal,
+  normalizePublicVote,
   proposalContributionPoints,
   proposalStageMultiplier,
   publicValueClassificationMetadata,
+  type CandidateVote,
+  type PublicVoteAnalysis,
+  type PublicVoteRecord,
   type ProposalStage,
 } from "../src/lib/public-value";
 
@@ -35,6 +41,10 @@ const PROFILE_OUTPUT = new URL(
 );
 const PENDING_OUTPUT = new URL(
   "../src/data/public-value-classification-pending.json",
+  import.meta.url,
+);
+const PUBLIC_VOTE_PENDING_OUTPUT = new URL(
+  "../src/data/public-vote-classification-pending.json",
   import.meta.url,
 );
 const CHAMBER_API = "https://dadosabertos.camara.leg.br/api/v2";
@@ -112,6 +122,23 @@ type PeriodAccumulator = {
     proposedValue: number;
     transferredValue: number;
   }>;
+  publicVotes: Array<PublicVoteProfileRecord>;
+};
+
+type PublicVoteProfileRecord = PublicVoteRecord & {
+  date: string;
+  description: string;
+  summary: string;
+  url: string;
+};
+
+type PublicVoteMetadata = {
+  id: string;
+  date: string;
+  description: string;
+  summary: string;
+  url: string;
+  analysis: PublicVoteAnalysis | null;
 };
 
 type DeputyAccumulator = {
@@ -168,6 +195,10 @@ function dateOnly(value: string | undefined) {
   return value?.slice(0, 10) || null;
 }
 
+function truncateText(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
+}
+
 function timestamp(value: string) {
   return new Date(`${value}T00:00:00Z`).getTime();
 }
@@ -221,6 +252,7 @@ function emptyPeriod(): PeriodAccumulator {
     largestExpenses: [],
     proposals: new Map(),
     amendments: [],
+    publicVotes: [],
   };
 }
 
@@ -230,9 +262,19 @@ function periodIdsForDate(date: string | null) {
 }
 
 async function fetchJson<T>(url: string, attempt = 0): Promise<T> {
-  const response = await fetch(url, {
-    headers: { accept: "application/json", "user-agent": USER_AGENT },
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { accept: "application/json", "user-agent": USER_AGENT },
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    if (attempt < 6) {
+      await new Promise((resolve) => setTimeout(resolve, 750 * 2 ** attempt));
+      return fetchJson<T>(url, attempt + 1);
+    }
+    throw error;
+  }
   if ((response.status === 429 || response.status >= 500) && attempt < 6) {
     const retryAfter = Number(response.headers.get("retry-after") || 0) * 1000;
     const delay = Math.max(retryAfter, 750 * 2 ** attempt);
@@ -244,29 +286,40 @@ async function fetchJson<T>(url: string, attempt = 0): Promise<T> {
 }
 
 async function fetchBuffer(url: string) {
-  const response = await fetch(url, { headers: { "user-agent": USER_AGENT } });
+  const response = await fetch(url, {
+    headers: { "user-agent": USER_AGENT },
+    signal: AbortSignal.timeout(60_000),
+  });
   if (!response.ok) throw new Error(`${response.status} ao baixar ${url}`);
   return Buffer.from(await response.arrayBuffer());
 }
 
-async function forEachRemoteCsv(url: string, onRow: (row: CsvRow) => void) {
+async function forEachRemoteCsv(
+  url: string,
+  onRow: (row: CsvRow) => void,
+  attempt = 0,
+) {
   console.log(`Lendo ${url}`);
-  const response = await fetch(url, { headers: { "user-agent": USER_AGENT } });
-  if (!response.ok || !response.body) {
-    throw new Error(`${response.status} ao baixar ${url}`);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { "user-agent": USER_AGENT },
+      signal: AbortSignal.timeout(300_000),
+    });
+    if (!response.ok) {
+      throw new Error(`${response.status} ao baixar ${url}`);
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    await forEachBufferCsv(buffer, "utf8", onRow);
+  } catch (error) {
+    if (attempt < 4) {
+      const delay = 1_000 * 2 ** attempt;
+      console.warn(`Falha ao ler ${url}; tentando novamente em ${delay}ms`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return forEachRemoteCsv(url, onRow, attempt + 1);
+    }
+    throw error;
   }
-  const parser = Readable.fromWeb(
-    response.body as Parameters<typeof Readable.fromWeb>[0],
-  ).pipe(
-    parse({
-      bom: true,
-      columns: true,
-      delimiter: ";",
-      relax_quotes: true,
-      relax_column_count: true,
-    }),
-  );
-  for await (const row of parser) onRow(row as CsvRow);
 }
 
 async function forEachBufferCsv(
@@ -391,6 +444,7 @@ async function loadLegislatureDeputies() {
     new Map(deputies.map((deputy) => [deputy.id, deputy])).values(),
   );
   console.log(`Carregando histórico de ${unique.length} parlamentares`);
+  let loadedDetails = 0;
   const details = await mapLimit(unique, 8, async (deputy) => {
     const [detail, history] = await Promise.all([
       fetchJson<{
@@ -415,6 +469,10 @@ async function loadLegislatureDeputies() {
         `${CHAMBER_API}/deputados/${deputy.id}/historico`,
       ),
     ]);
+    loadedDetails += 1;
+    if (loadedDetails % 25 === 0 || loadedDetails === unique.length) {
+      console.log(`Históricos carregados: ${loadedDetails}/${unique.length}`);
+    }
     return {
       deputy,
       civilName: detail.dados.nomeCivil,
@@ -476,6 +534,29 @@ function forDatePeriods(
   }
 }
 
+function addPublicVoteRecord(
+  accumulator: DeputyAccumulator,
+  vote: PublicVoteMetadata,
+  candidateVote: CandidateVote,
+) {
+  if (!vote.analysis) return;
+  const record = buildPublicVoteRecord(
+    vote.analysis,
+    accumulator.deputy.id,
+    candidateVote,
+  );
+  forDatePeriods(accumulator, vote.date, (period) => {
+    period.publicVotes.push({
+      ...record,
+      date: vote.date,
+      description: truncateText(vote.description, 220),
+      summary: truncateText(vote.summary, 350),
+      source: vote.url,
+      url: vote.url,
+    });
+  });
+}
+
 async function loadParticipation(accumulators: Map<number, DeputyAccumulator>) {
   for (const year of YEARS) {
     const eligibleEvents = new Set<string>();
@@ -514,6 +595,97 @@ async function loadParticipation(accumulators: Map<number, DeputyAccumulator>) {
       },
     );
   }
+}
+
+async function loadPublicVotes(accumulators: Map<number, DeputyAccumulator>) {
+  const votes = new Map<string, PublicVoteMetadata>();
+  for (const year of YEARS) {
+    await forEachRemoteCsv(
+      `${CHAMBER_FILES}/votacoes/csv/votacoes-${year}.csv`,
+      (row) => {
+        const date = dateOnly(row.data || row.dataHoraRegistro);
+        if (!row.id || !date || date > PERIOD_END) return;
+        votes.set(row.id, {
+          id: row.id,
+          date,
+          description:
+            row.descricao ||
+            row.ultimaAberturaVotacao_descricao ||
+            row.ultimaApresentacaoProposicao_descricao ||
+            "Descrição não informada",
+          summary: "",
+          url: row.uri || `${CHAMBER_API}/votacoes/${row.id}`,
+          analysis: null,
+        });
+      },
+    );
+  }
+
+  const summaries = new Map<string, Set<string>>();
+  for (const year of YEARS) {
+    await forEachRemoteCsv(
+      `${CHAMBER_FILES}/votacoesObjetos/csv/votacoesObjetos-${year}.csv`,
+      (row) => {
+        const vote = votes.get(row.idVotacao);
+        if (!vote) return;
+        const bucket = summaries.get(row.idVotacao) || new Set<string>();
+        for (const value of [
+          row.descricao,
+          row.proposicao_ementa,
+          row.proposicao_titulo,
+        ]) {
+          if (value) bucket.add(value);
+        }
+        summaries.set(row.idVotacao, bucket);
+      },
+    );
+  }
+
+  for (const vote of votes.values()) {
+    vote.summary = [...(summaries.get(vote.id) || [])].join(" ");
+    vote.analysis = classifyPublicVote(vote.id, vote.description, vote.summary);
+  }
+
+  const castByVote = new Map<string, Set<number>>();
+  for (const year of YEARS) {
+    await forEachRemoteCsv(
+      `${CHAMBER_FILES}/votacoesVotos/csv/votacoesVotos-${year}.csv`,
+      (row) => {
+        const vote = votes.get(row.idVotacao);
+        if (!vote?.analysis) return;
+        const accumulator = accumulators.get(Number(row.deputado_id));
+        if (!accumulator) return;
+        const candidateVote = normalizePublicVote(row.voto);
+        addPublicVoteRecord(accumulator, vote, candidateVote);
+        if (
+          vote.analysis.severity === "high" ||
+          vote.analysis.severity === "critical"
+        ) {
+          const cast = castByVote.get(vote.id) || new Set<number>();
+          cast.add(accumulator.deputy.id);
+          castByVote.set(vote.id, cast);
+        }
+      },
+    );
+  }
+
+  for (const vote of votes.values()) {
+    if (
+      !vote.analysis ||
+      (vote.analysis.severity !== "high" && vote.analysis.severity !== "critical")
+    ) {
+      continue;
+    }
+    const cast = castByVote.get(vote.id) || new Set<number>();
+    for (const accumulator of accumulators.values()) {
+      if (cast.has(accumulator.deputy.id)) continue;
+      if (periodIdsForDate(vote.date).some((periodId) => accumulator.periods.has(periodId))) {
+        addPublicVoteRecord(accumulator, vote, "absent");
+      }
+    }
+  }
+
+  return votes;
 }
 
 async function loadProduction(accumulators: Map<number, DeputyAccumulator>) {
@@ -807,6 +979,7 @@ function buildPeriodDeputy(
     campaignExpensesAvailable: false,
     accountsStatusAvailable: false,
     ...publicValueMetrics(period),
+    ...publicVoteMetrics(period),
   };
   return {
     id: item.deputy.id,
@@ -841,6 +1014,36 @@ function publicValueMetrics(period: PeriodAccumulator) {
     publicContributionPoints: classified > 0 ? Number(points.toFixed(2)) : null,
     publicClassifiedProposals: classified,
     publicTotalProposals: period.proposals.size,
+  };
+}
+
+function publicVoteMetrics(period: PeriodAccumulator) {
+  let positive = 0;
+  let votePenalties = 0;
+  let absencePenalties = 0;
+  let confidence = 0;
+
+  for (const vote of period.publicVotes) {
+    if (vote.scoreDelta > 0) {
+      positive += vote.scoreDelta;
+    } else if (vote.scoreDelta < 0 && vote.candidateVote === "absent") {
+      absencePenalties += Math.abs(vote.scoreDelta);
+    } else if (vote.scoreDelta < 0) {
+      votePenalties += Math.abs(vote.scoreDelta);
+    }
+    confidence += vote.confidence;
+  }
+
+  const analyzed = period.publicVotes.length;
+  const score = positive - votePenalties - absencePenalties;
+  return {
+    publicVotePositivePoints: Number(positive.toFixed(2)),
+    publicVoteNegativePenalties: Number(votePenalties.toFixed(2)),
+    publicVoteAbsencePenalties: Number(absencePenalties.toFixed(2)),
+    publicVotesAnalyzed: analyzed,
+    publicVoteAverageConfidence:
+      analyzed > 0 ? Number((confidence / analyzed).toFixed(3)) : null,
+    publicVoteScore: analyzed > 0 ? Number(score.toFixed(2)) : null,
   };
 }
 
@@ -882,6 +1085,13 @@ function buildProfilePeriod(
         };
       })
       .slice(0, 10),
+    publicVotes: [...period.publicVotes]
+      .sort(
+        (a, b) =>
+          Math.abs(b.scoreDelta) - Math.abs(a.scoreDelta) ||
+          b.date.localeCompare(a.date),
+      )
+      .slice(0, 8),
     amendments: [...period.amendments]
       .sort(
         (a, b) =>
@@ -924,6 +1134,25 @@ function buildClassificationPending(
     proposals: [...proposals.values()].sort(
       (a, b) => Number(b.year) - Number(a.year) || a.id.localeCompare(b.id),
     ),
+  };
+}
+
+function buildPublicVoteClassificationPending(votes: Map<string, PublicVoteMetadata>) {
+  const pending = [...votes.values()]
+    .filter((vote) => !vote.analysis)
+    .map(({ id, date, description, summary, url }) => ({
+      id,
+      date,
+      description: truncateText(description, 300),
+      summary: truncateText(summary, 700),
+      url,
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+  return {
+    generatedAt: new Date().toISOString(),
+    methodologyVersion: "2026-06-15-votes",
+    total: pending.length,
+    votes: pending,
   };
 }
 
@@ -1003,6 +1232,7 @@ async function main() {
   console.log(`Sincronizando a ${LEGISLATURE}ª legislatura até ${PERIOD_END}`);
   const accumulators = await loadLegislatureDeputies();
   await loadParticipation(accumulators);
+  const publicVotes = await loadPublicVotes(accumulators);
   await loadProduction(accumulators);
   await loadExpenses(accumulators);
   await loadTse(accumulators);
@@ -1011,6 +1241,8 @@ async function main() {
   const snapshot = buildSnapshot(accumulators);
   const profileDetails = buildProfileDetails(accumulators);
   const classificationPending = buildClassificationPending(accumulators);
+  const publicVoteClassificationPending =
+    buildPublicVoteClassificationPending(publicVotes);
   await mkdir(new URL("../src/data", import.meta.url), { recursive: true });
   await writeFile(OUTPUT, `${JSON.stringify(snapshot, null, 2)}\n`);
   await writeFile(
@@ -1021,11 +1253,18 @@ async function main() {
     PENDING_OUTPUT,
     `${JSON.stringify(classificationPending, null, 2)}\n`,
   );
+  await writeFile(
+    PUBLIC_VOTE_PENDING_OUTPUT,
+    `${JSON.stringify(publicVoteClassificationPending, null, 2)}\n`,
+  );
   console.log(
     `Snapshot v2 salvo com ${snapshot.deputies.length} parlamentares e ${snapshot.periods.length} períodos`,
   );
   console.log(
     `${classificationPending.total} proposições aguardando revisão de classificação`,
+  );
+  console.log(
+    `${publicVoteClassificationPending.total} votações aguardando revisão de classificação`,
   );
 }
 

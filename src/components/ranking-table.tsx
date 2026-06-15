@@ -112,6 +112,16 @@ export function RankingTable({
                 direction={direction}
                 onOrderChange={onOrderChange}
               />
+              {index === "public-value" && (
+                <SortableHead
+                  className="min-w-28"
+                  label="Votos públicos"
+                  value="publicVotes"
+                  order={order}
+                  direction={direction}
+                  onOrderChange={onOrderChange}
+                />
+              )}
               <SortableHead
                 className="min-w-28"
                 label="Transparência"
@@ -203,6 +213,21 @@ export function RankingTable({
                     compact
                   />
                 </TableCell>
+                {index === "public-value" && (
+                  <TableCell>
+                    <DimensionScore
+                      label={`${deputy.metrics.publicVotesAnalyzed ?? 0} analisados`}
+                      value={publicDimension(deputy, "publicVotes")}
+                      explanation={dimensionExplanation(
+                        deputy,
+                        index,
+                        "publicVotes",
+                      )}
+                      index={index}
+                      compact
+                    />
+                  </TableCell>
+                )}
                 <TableCell>
                   <DimensionScore
                     label="dados oficiais"
@@ -290,6 +315,18 @@ export function RankingTable({
                 )}
                 index={index}
               />
+              {index === "public-value" && (
+                <DimensionScore
+                  label="Votos públicos"
+                  value={publicDimension(deputy, "publicVotes")}
+                  explanation={dimensionExplanation(
+                    deputy,
+                    index,
+                    "publicVotes",
+                  )}
+                  index={index}
+                />
+              )}
               <DimensionScore
                 label="Transparência"
                 value={deputy.dimensions.transparency}
@@ -460,12 +497,12 @@ function currentDimension(
 
 function publicDimension(
   deputy: RankedDeputy | PublicValueRankedDeputy,
-  key: "contribution" | "efficiency",
+  key: "contribution" | "publicVotes" | "efficiency",
 ) {
   if (!("contribution" in deputy.dimensions)) return null;
-  return key === "contribution"
-    ? deputy.dimensions.contribution
-    : deputy.dimensions.efficiency;
+  if (key === "contribution") return deputy.dimensions.contribution;
+  if (key === "publicVotes") return deputy.dimensions.publicVotes;
+  return deputy.dimensions.efficiency;
 }
 
 function labelStyle(label: string) {

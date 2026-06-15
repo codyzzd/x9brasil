@@ -88,6 +88,14 @@ function mergePeriods(
     )
       .sort((a, b) => b.date.localeCompare(a.date))
       .slice(0, 10),
+    publicVotes: periods
+      .flatMap((period) => period.publicVotes || [])
+      .sort(
+        (a, b) =>
+          Math.abs(b.scoreDelta) - Math.abs(a.scoreDelta) ||
+          b.date.localeCompare(a.date),
+      )
+      .slice(0, 8),
     amendments: periods
       .flatMap((period) => period.amendments)
       .sort(

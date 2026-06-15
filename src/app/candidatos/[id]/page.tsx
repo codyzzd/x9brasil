@@ -17,6 +17,7 @@ import {
   AnnualEvolutionChart,
   type AnnualEvolutionPoint,
 } from "@/components/annual-evolution-chart";
+import { CandidatePeriodSelect } from "@/components/candidate-period-select";
 import { DimensionScore } from "@/components/dimension-score";
 import { SemanticScore } from "@/components/semantic-score";
 import { SiteFooter } from "@/components/site-footer";
@@ -32,7 +33,7 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { getDeputy, rankingSnapshot } from "@/lib/data";
+import { getDeputy, getPeriodOptions, rankingSnapshot } from "@/lib/data";
 import { dimensionExplanation } from "@/lib/dimension-explanations";
 import { getProfileDetails } from "@/lib/profile-data";
 import {
@@ -40,6 +41,7 @@ import {
   calculateRanking,
   calculateRankChanges,
   comparisonPeriod,
+  defaultRankingPeriod,
   filterRankingCohort,
   formatCurrency,
   getRankingPeriod,
@@ -89,7 +91,7 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
     context.comparacao === "ano-a-ano" ? "previous-year" : "legislature-start";
   const period = getRankingPeriod(
     rankingSnapshot,
-    context.periodo || rankingSnapshot.defaultPeriod,
+    context.periodo || defaultRankingPeriod(rankingSnapshot).id,
   );
   const periodDeputies = materializePeriod(rankingSnapshot, period.id);
   const cohort = filterRankingCohort(
@@ -180,6 +182,13 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
   }
   if (context.uf) back.set("uf", context.uf);
   if (context.partido) back.set("partido", context.partido);
+  const periodQuery = new URLSearchParams();
+  periodQuery.set("indice", index === "public-value" ? "valor-publico" : "atual");
+  if (comparison === "previous-year" && /^\d{4}$/.test(period.id)) {
+    periodQuery.set("comparacao", "ano-a-ano");
+  }
+  if (context.uf) periodQuery.set("uf", context.uf);
+  if (context.partido) periodQuery.set("partido", context.partido);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -269,6 +278,19 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
             </CardContent>
           </Card>
 
+          <Card className="mt-6">
+            <CardContent>
+              <CandidatePeriodSelect
+                period={period.id}
+                periods={getPeriodOptions().map(({ id, label }) => ({
+                  id,
+                  label,
+                }))}
+                query={periodQuery.toString()}
+              />
+            </CardContent>
+          </Card>
+
           <Card className="mt-6 min-w-0 overflow-hidden">
             <CardHeader>
               <CardTitle>Evolução anual</CardTitle>
@@ -304,6 +326,9 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
                 <TabsTrigger value="fornecedores">Quem recebeu</TabsTrigger>
                 <TabsTrigger value="equipe">Equipe</TabsTrigger>
                 <TabsTrigger value="producao">Produção legislativa</TabsTrigger>
+                {index === "public-value" && (
+                  <TabsTrigger value="votos-publicos">Votos públicos</TabsTrigger>
+                )}
                 <TabsTrigger value="emendas">Emendas</TabsTrigger>
                 <TabsTrigger value="patrimonio">Patrimônio</TabsTrigger>
                 <TabsTrigger value="fontes">Fontes</TabsTrigger>
@@ -429,6 +454,119 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
                   </Card>
                 </div>
               </TabsContent>
+
+              {index === "public-value" && (
+                <TabsContent value="votos-publicos" className="mt-5">
+                  <div className="space-y-5">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Votos públicos analisados</CardTitle>
+                        <CardDescription>
+                          Bônus e penalidades ligados a votações nominais
+                          específicas, com regra conservadora e fonte oficial.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="grid gap-4 sm:grid-cols-2">
+                        <MetricCard
+                          label="Pontos positivos"
+                          value={formatDecimal(
+                            ranked.metrics.publicVotePositivePoints,
+                          )}
+                          detail="Votos alinhados a votações classificadas como interesse público"
+                        />
+                        <MetricCard
+                          label="Penalidades por voto"
+                          value={formatDecimal(
+                            ranked.metrics.publicVoteNegativePenalties,
+                          )}
+                          detail="Votos contrários ao interesse público em votações classificadas"
+                        />
+                        <MetricCard
+                          label="Penalidades por ausência"
+                          value={formatDecimal(
+                            ranked.metrics.publicVoteAbsencePenalties,
+                          )}
+                          detail="Aplicadas apenas em votações de relevância alta ou crítica"
+                        />
+                        <MetricCard
+                          label="Confiança média"
+                          value={
+                            ranked.metrics.publicVoteAverageConfidence === null ||
+                            ranked.metrics.publicVoteAverageConfidence === undefined
+                              ? null
+                              : `${formatDecimal(
+                                  ranked.metrics.publicVoteAverageConfidence * 100,
+                                )}%`
+                          }
+                          detail={`${ranked.metrics.publicVotesAnalyzed ?? 0} registros auditáveis no período`}
+                        />
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-lg">Registros de maior impacto</CardTitle>
+                        <CardDescription>
+                          Até 8 votos ou ausências com maior efeito no período.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        {periodDetails?.publicVotes?.length ? (
+                          periodDetails.publicVotes.map((vote) => (
+                            <a
+                              key={`${vote.voteId}-${vote.candidateVote}`}
+                              href={vote.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block rounded-lg border p-4 hover:bg-muted"
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge variant="secondary">
+                                    {publicVoteClassificationLabel(
+                                      vote.classification,
+                                    )}
+                                  </Badge>
+                                  <Badge variant="outline">
+                                    {severityLabel(vote.severity)}
+                                  </Badge>
+                                </div>
+                                <span
+                                  className={cn(
+                                    "font-semibold tabular-nums",
+                                    vote.scoreDelta < 0
+                                      ? "text-red-700 dark:text-red-400"
+                                      : vote.scoreDelta > 0
+                                        ? "text-emerald-700 dark:text-emerald-400"
+                                        : "text-muted-foreground",
+                                  )}
+                                >
+                                  {vote.scoreDelta > 0 ? "+" : ""}
+                                  {formatDecimal(vote.scoreDelta)}
+                                </span>
+                              </div>
+                              <p className="mt-2 text-sm text-pretty">
+                                {vote.description}
+                              </p>
+                              {vote.summary && (
+                                <p className="mt-1 text-xs text-muted-foreground text-pretty">
+                                  {vote.summary}
+                                </p>
+                              )}
+                              <p className="mt-3 text-xs text-muted-foreground">
+                                Voto: {candidateVoteLabel(vote.candidateVote)} ·
+                                confiança {formatDecimal(vote.confidence * 100)}% ·{" "}
+                                {vote.reason}
+                              </p>
+                            </a>
+                          ))
+                        ) : (
+                          <EmptyData text="Nenhuma votação classificada entrou no cálculo deste período." />
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+                </TabsContent>
+              )}
 
               <TabsContent value="equipe" className="mt-5">
                 <Card>
@@ -738,7 +876,7 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
                   <CardTitle>Composição do score</CardTitle>
                   <CardDescription>
                     {index === "public-value"
-                      ? "50% contribuição, 25% eficiência, 15% participação e 10% transparência."
+                      ? "40% contribuição, 20% votos públicos, 20% eficiência, 10% participação e 10% transparência."
                       : "25% para cada dimensão."}
                   </CardDescription>
                 </CardHeader>
@@ -751,6 +889,18 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
                         ranked,
                         index,
                         "contribution",
+                      )}
+                      index={index}
+                    />
+                  )}
+                  {index === "public-value" && (
+                    <DimensionScore
+                      label="Votos públicos"
+                      value={profileDimension(ranked, "publicVotes")}
+                      explanation={dimensionExplanation(
+                        ranked,
+                        index,
+                        "publicVotes",
                       )}
                       index={index}
                     />
@@ -908,7 +1058,7 @@ function EmptyData({ text }: { text: string }) {
 
 function profileDimension(
   deputy: RankedDeputy | PublicValueRankedDeputy,
-  key: "production" | "resources" | "contribution" | "efficiency",
+  key: "production" | "resources" | "contribution" | "publicVotes" | "efficiency",
 ) {
   if ("production" in deputy.dimensions) {
     if (key === "production") return deputy.dimensions.production;
@@ -916,8 +1066,39 @@ function profileDimension(
     return null;
   }
   if (key === "contribution") return deputy.dimensions.contribution;
+  if (key === "publicVotes") return deputy.dimensions.publicVotes;
   if (key === "efficiency") return deputy.dimensions.efficiency;
   return null;
+}
+
+function formatDecimal(value: number | null | undefined) {
+  return value === null || value === undefined
+    ? "Dados indisponíveis"
+    : new Intl.NumberFormat("pt-BR", {
+        maximumFractionDigits: 2,
+      }).format(value);
+}
+
+function candidateVoteLabel(value: string) {
+  if (value === "yes") return "sim";
+  if (value === "no") return "não";
+  if (value === "absent") return "ausente";
+  return "abstenção";
+}
+
+function severityLabel(value: string) {
+  if (value === "critical") return "crítica";
+  if (value === "high") return "alta";
+  if (value === "medium") return "média";
+  return "baixa";
+}
+
+function publicVoteClassificationLabel(value: string) {
+  if (value === "positive_public_interest") return "interesse público";
+  if (value === "low_relevance") return "baixa relevância";
+  if (value === "negative_public_interest") return "negativa";
+  if (value === "harmful_or_self_serving") return "auto-benefício";
+  return "neutra";
 }
 
 function stageLabel(stage: string) {

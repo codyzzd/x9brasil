@@ -1,5 +1,6 @@
 import snapshotJson from "@/data/ranking-snapshot.json";
 import {
+  defaultRankingPeriod,
   getRankingPeriod,
   materializePeriod,
   type RankingSnapshot,
@@ -40,6 +41,6 @@ export function getPeriodFacets(periodId: string) {
 export function resolvePeriod(periodId?: string) {
   return getRankingPeriod(
     rankingSnapshot,
-    periodId || rankingSnapshot.defaultPeriod,
+    periodId || defaultRankingPeriod(rankingSnapshot).id,
   );
 }

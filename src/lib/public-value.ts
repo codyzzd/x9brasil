@@ -1,9 +1,11 @@
 import classificationJson from "@/data/public-value-classifications.json";
+import voteClassificationJson from "@/data/public-vote-classifications.json";
 
 export const PUBLIC_VALUE_WEIGHTS = {
-  contribution: 0.5,
-  efficiency: 0.25,
-  participation: 0.15,
+  contribution: 0.4,
+  publicVotes: 0.2,
+  efficiency: 0.2,
+  participation: 0.1,
   transparency: 0.1,
 } as const;
 
@@ -28,6 +30,15 @@ export const PUBLIC_VALUE_CATEGORIES = {
 export type PublicValueCategory = keyof typeof PUBLIC_VALUE_CATEGORIES;
 export type ClassificationConfidence = "high" | "medium" | "low";
 export type ProposalStage = "presented" | "advanced" | "converted";
+export type PublicVoteClassification =
+  | "positive_public_interest"
+  | "neutral"
+  | "low_relevance"
+  | "negative_public_interest"
+  | "harmful_or_self_serving";
+export type PublicVoteSeverity = "low" | "medium" | "high" | "critical";
+export type CandidateVote = "yes" | "no" | "abstain" | "absent";
+export type PublicInterestVote = "yes" | "no" | "any" | "none";
 
 export type ProposalClassification = {
   category: PublicValueCategory;
@@ -52,6 +63,50 @@ type ClassificationFile = {
 };
 
 const classificationFile = classificationJson as ClassificationFile;
+
+type PublicVoteClassificationFile = {
+  version: number;
+  methodologyVersion: string;
+  reviewedAt: string;
+  classifications: Record<
+    string,
+    {
+      classification: PublicVoteClassification;
+      severity: PublicVoteSeverity;
+      publicInterestVote: PublicInterestVote;
+      confidence: number;
+      reason: string;
+    }
+  >;
+};
+
+export type PublicVoteAnalysis = {
+  voteId: string;
+  classification: PublicVoteClassification;
+  severity: PublicVoteSeverity;
+  publicInterestVote: PublicInterestVote;
+  confidence: number;
+  reason: string;
+  source: "reviewed" | "rule";
+  reviewedManually: boolean;
+  methodologyVersion: string;
+};
+
+export type PublicVoteRecord = {
+  voteId: string;
+  candidateId: string;
+  candidateVote: CandidateVote;
+  classification: PublicVoteClassification;
+  severity: PublicVoteSeverity;
+  scoreDelta: number;
+  confidence: number;
+  reason: string;
+  source: string;
+  reviewedManually: boolean;
+};
+
+const voteClassificationFile =
+  voteClassificationJson as PublicVoteClassificationFile;
 
 const rules: Array<{
   category: PublicValueCategory;
@@ -147,6 +202,16 @@ export function normalizeProposalText(value: string) {
     .toLocaleLowerCase("pt-BR");
 }
 
+export function normalizePublicVote(value: string | null | undefined): CandidateVote {
+  const normalized = normalizeProposalText(value || "");
+  if (normalized === "sim") return "yes";
+  if (normalized === "nao") return "no";
+  if (normalized.includes("abstencao") || normalized.includes("obstrucao")) {
+    return "abstain";
+  }
+  return "abstain";
+}
+
 export function classifyProposal(
   proposalId: string,
   summary: string,
@@ -196,4 +261,190 @@ export function publicValueClassificationMetadata() {
     methodologyVersion: classificationFile.methodologyVersion,
     reviewedAt: classificationFile.reviewedAt,
   };
+}
+
+export function classifyPublicVote(
+  voteId: string,
+  description: string,
+  summary: string,
+): PublicVoteAnalysis | null {
+  const reviewed = voteClassificationFile.classifications[voteId];
+  if (reviewed) {
+    return {
+      voteId,
+      ...reviewed,
+      source: "reviewed",
+      reviewedManually: true,
+      methodologyVersion: voteClassificationFile.methodologyVersion,
+    };
+  }
+
+  const text = normalizeProposalText(`${description} ${summary}`);
+  if (matchesAny(text, [/\bhomenagem\b/, /\bhomenageia\b/, /\bmedalha\b/, /\btitulo honorifico\b/, /\bdenomina\b/])) {
+    return publicVoteRule(voteId, {
+      classification: "low_relevance",
+      severity: "low",
+      publicInterestVote: "none",
+      confidence: 0.75,
+      reason:
+        "A votação trata de homenagem, denominação ou ato simbólico, com baixo impacto prático direto para a população.",
+    });
+  }
+
+  if (
+    matchesAny(text, [
+      /\baumenta\b.*\b(salario|subsidio|verba|beneficio|cotao|cota parlamentar)\b/,
+      /\breajusta\b.*\b(salario|subsidio|verba|beneficio|cotao|cota parlamentar)\b/,
+      /\bamplia\b.*\b(verba|beneficio|cotao|cota parlamentar)\b/,
+      /\bprivilegio\b.*\b(parlamentar|politico|partido)\b/,
+    ])
+  ) {
+    return publicVoteRule(voteId, {
+      classification: "harmful_or_self_serving",
+      severity: "critical",
+      publicInterestVote: "no",
+      confidence: 0.9,
+      reason:
+        "A votação aparenta ampliar custo ou benefício direto para parlamentares, partidos ou a própria classe política, sem benefício público claro.",
+    });
+  }
+
+  if (
+    matchesAny(text, [
+      /\breduz\b.*\b(transparencia|acesso a informacao|prestacao de contas|fiscalizacao|controle)\b/,
+      /\brestringe\b.*\b(transparencia|acesso a informacao|prestacao de contas|fiscalizacao|controle)\b/,
+      /\bsigilo\b.*\b(publico|dados|informacao|prestacao de contas)\b/,
+    ])
+  ) {
+    return publicVoteRule(voteId, {
+      classification: "negative_public_interest",
+      severity: "high",
+      publicInterestVote: "no",
+      confidence: 0.85,
+      reason:
+        "A votação indica redução de transparência, acesso à informação, prestação de contas ou fiscalização pública.",
+    });
+  }
+
+  if (
+    matchesAny(text, [
+      /\btransparencia\b/,
+      /\bacesso a informacao\b/,
+      /\bdados abertos\b/,
+      /\bprestacao de contas\b/,
+      /\bfiscalizacao\b/,
+      /\bcontrole externo\b/,
+      /\bcombate a corrupcao\b/,
+      /\bimprobidade\b/,
+    ])
+  ) {
+    return publicVoteRule(voteId, {
+      classification: "positive_public_interest",
+      severity: "high",
+      publicInterestVote: "yes",
+      confidence: 0.8,
+      reason:
+        "A votação trata de transparência, prestação de contas, fiscalização ou integridade pública, critérios objetivos de interesse público.",
+    });
+  }
+
+  if (
+    matchesAny(text, [
+      /\bdesburocrat/,
+      /\bsimplific/,
+      /\bservico publico\b/,
+      /\bsaude\b/,
+      /\beducacao\b/,
+      /\bseguranca publica\b/,
+      /\btransporte publico\b/,
+      /\bsaneamento\b/,
+    ])
+  ) {
+    return publicVoteRule(voteId, {
+      classification: "positive_public_interest",
+      severity: "medium",
+      publicInterestVote: "yes",
+      confidence: 0.7,
+      reason:
+        "A votação trata de simplificação, serviço essencial ou política pública de alcance social relevante.",
+    });
+  }
+
+  return null;
+}
+
+export function publicVoteScoreDelta(
+  analysis: PublicVoteAnalysis,
+  candidateVote: CandidateVote,
+) {
+  if (analysis.confidence < 0.6) return 0;
+  if (candidateVote === "absent") {
+    if (analysis.severity !== "high" && analysis.severity !== "critical") return 0;
+    return analysis.severity === "critical" ? -8 : -4;
+  }
+  if (candidateVote === "abstain") return 0;
+  if (analysis.publicInterestVote === "none") return 0;
+  if (analysis.publicInterestVote === "any") return severityPoints(analysis.severity);
+
+  const aligned = candidateVote === analysis.publicInterestVote;
+  const points = severityPoints(analysis.severity);
+  if (analysis.classification === "negative_public_interest") {
+    return aligned ? Math.round(points * 0.6) : -points;
+  }
+  if (analysis.classification === "harmful_or_self_serving") {
+    return aligned ? Math.round(points * 0.7) : -points;
+  }
+  if (analysis.classification === "low_relevance") {
+    return aligned ? -2 : 0;
+  }
+  if (analysis.classification === "positive_public_interest") {
+    return aligned ? points : -Math.round(points * 0.7);
+  }
+  return 0;
+}
+
+export function buildPublicVoteRecord(
+  analysis: PublicVoteAnalysis,
+  candidateId: number | string,
+  candidateVote: CandidateVote,
+): PublicVoteRecord {
+  return {
+    voteId: analysis.voteId,
+    candidateId: String(candidateId),
+    candidateVote,
+    classification: analysis.classification,
+    severity: analysis.severity,
+    scoreDelta: publicVoteScoreDelta(analysis, candidateVote),
+    confidence: analysis.confidence,
+    reason: analysis.reason,
+    source: analysis.source,
+    reviewedManually: analysis.reviewedManually,
+  };
+}
+
+function publicVoteRule(
+  voteId: string,
+  analysis: Omit<
+    PublicVoteAnalysis,
+    "voteId" | "source" | "reviewedManually" | "methodologyVersion"
+  >,
+): PublicVoteAnalysis {
+  return {
+    voteId,
+    ...analysis,
+    source: "rule",
+    reviewedManually: false,
+    methodologyVersion: voteClassificationFile.methodologyVersion,
+  };
+}
+
+function matchesAny(value: string, patterns: RegExp[]) {
+  return patterns.some((pattern) => pattern.test(value));
+}
+
+function severityPoints(severity: PublicVoteSeverity) {
+  if (severity === "critical") return 30;
+  if (severity === "high") return 18;
+  if (severity === "medium") return 10;
+  return 4;
 }

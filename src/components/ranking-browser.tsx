@@ -16,6 +16,7 @@ import {
   calculatePublicValueRanking,
   calculateRanking,
   calculateRankChanges,
+  defaultRankingPeriod,
   filterRankingCohort,
   comparisonPeriod,
   getRankingPeriod,
@@ -163,7 +164,7 @@ export function RankingBrowser({
   }, [contextQuery, pathname, router]);
 
   const reset = () => {
-    setPeriod(snapshot.defaultPeriod);
+    setPeriod(defaultRankingPeriod(snapshot).id);
     setComparison("legislature-start");
     setIndex("current");
     setState("all");
@@ -283,7 +284,8 @@ export function RankingBrowser({
             <p className="mt-1 text-xs leading-5">
               A nota usa contribuição temática classificada, eficiência por gasto,
               participação e cobertura de dados. Propostas pendentes de revisão não
-              recebem zero e reduzem a cobertura disponível.
+              recebem zero; votações ambíguas também ficam fora das penalidades
+              automáticas.
             </p>
           </div>
         )}
@@ -355,6 +357,9 @@ function dimensionValue(deputy: AnyRankedDeputy, order: RankingOrder) {
   }
   if (order === "contribution" && "contribution" in deputy.dimensions) {
     return deputy.dimensions.contribution ?? -1;
+  }
+  if (order === "publicVotes" && "publicVotes" in deputy.dimensions) {
+    return deputy.dimensions.publicVotes ?? -1;
   }
   if (order === "efficiency" && "efficiency" in deputy.dimensions) {
     return deputy.dimensions.efficiency ?? -1;

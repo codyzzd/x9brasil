@@ -264,29 +264,34 @@ export default function MethodologyPage() {
             <CardContent className="space-y-5 text-sm leading-6">
               <pre className="overflow-x-auto rounded-lg bg-muted p-4 text-sm">
                 score = contribuição × {PUBLIC_VALUE_WEIGHTS.contribution * 100}%
+                {"\n"}      + votos públicos × {PUBLIC_VALUE_WEIGHTS.publicVotes * 100}%
                 {"\n"}      + eficiência × {PUBLIC_VALUE_WEIGHTS.efficiency * 100}%
                 {"\n"}      + participação × {PUBLIC_VALUE_WEIGHTS.participation * 100}%
                 {"\n"}      + transparência × {PUBLIC_VALUE_WEIGHTS.transparency * 100}%
               </pre>
               <Method
-                title="1. Contribuição pública — 50%"
+                title="1. Contribuição pública — 40%"
                 text="Cada proposição classificada recebe pontos do tema multiplicados pelo estágio: 25% quando apenas apresentada, 75% quando possui tramitação e 100% quando transformada em norma. Somamos os pontos, dividimos pelos meses em exercício e convertemos o resultado em percentil nacional. Nesta versão, somente a autoria principal é considerada."
               />
               <Method
-                title="2. Eficiência financeira — 25%"
+                title="2. Votos públicos — 20%"
+                text="Cada votação nominal pode ser classificada por critérios objetivos: impacto fiscal, transparência, fiscalização, privilégio político, serviço público, alcance social, burocracia e viabilidade. Só votações com fonte oficial e classificação clara geram bônus ou penalidade. Casos ambíguos ficam neutros ou pendentes; ausências só penalizam votações de relevância alta ou crítica."
+              />
+              <Method
+                title="3. Eficiência financeira — 20%"
                 text="Calculamos pontos de contribuição ÷ despesas da cota × R$ 100 mil. Essa razão, que representa quantos pontos foram obtidos por R$ 100 mil gastos, vira um percentil nacional. Gastar mais não reduz a nota isoladamente; reduz quando a contribuição não acompanha o gasto."
               />
               <Method
-                title="3. Participação — 15%"
+                title="4. Participação — 10%"
                 text="É a média dos percentis nacionais de presenças em sessões e votos nominais por mês em exercício, usando o mesmo cálculo de participação do Índice atual."
               />
               <Method
-                title="4. Transparência — 10%"
+                title="5. Transparência — 10%"
                 text="Usa os mesmos cinco blocos oficiais do Índice atual, com 20 pontos por bloco disponível."
               />
               <Method
                 title="Elegibilidade e posição"
-                text="Exige pelo menos três meses de mandato e dados disponíveis de contribuição, eficiência e participação. Proposições ainda não classificadas não viram contribuição zero. Os elegíveis são ordenados pela nota final; empates seguem a ordem alfabética."
+                text="Exige pelo menos três meses de mandato e dados disponíveis de contribuição, votos públicos, eficiência e participação. Proposições e votações ainda não classificadas não viram zero. Os elegíveis são ordenados pela nota final; empates seguem a ordem alfabética."
               />
               <Method
                 title="Comparação"

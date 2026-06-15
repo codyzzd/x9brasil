@@ -1,3 +1,5 @@
+import { PUBLIC_VALUE_WEIGHTS } from "@/lib/public-value";
+
 export const SCORE_WEIGHTS = {
   participation: 0.25,
   production: 0.25,
@@ -27,6 +29,12 @@ export type RawMetrics = {
   publicContributionPoints?: number | null;
   publicClassifiedProposals?: number;
   publicTotalProposals?: number;
+  publicVotePositivePoints?: number;
+  publicVoteNegativePenalties?: number;
+  publicVoteAbsencePenalties?: number;
+  publicVotesAnalyzed?: number;
+  publicVoteAverageConfidence?: number | null;
+  publicVoteScore?: number | null;
 };
 
 export type DeputyIdentity = {
@@ -113,6 +121,21 @@ export type ProfilePeriodDetails = {
       methodologyVersion: string;
     } | null;
   }>;
+  publicVotes?: Array<{
+    voteId: string;
+    date: string;
+    description: string;
+    summary: string;
+    url: string;
+    candidateVote: string;
+    classification: string;
+    severity: string;
+    scoreDelta: number;
+    confidence: number;
+    reason: string;
+    source: string;
+    reviewedManually: boolean;
+  }>;
   amendments: Array<{
     number: string;
     year: string;
@@ -175,6 +198,7 @@ export type RankedDeputy = DeputyRecord & {
 
 export type PublicValueDimensions = {
   contribution: number | null;
+  publicVotes: number | null;
   efficiency: number | null;
   participation: number | null;
   transparency: number;
@@ -201,6 +225,14 @@ export type RankChange = {
 export function getRankingPeriod(snapshot: RankingSnapshot, periodId: string) {
   return (
     snapshot.periods.find((period) => period.id === periodId) ||
+    defaultRankingPeriod(snapshot) ||
+    snapshot.periods[0]
+  );
+}
+
+export function defaultRankingPeriod(snapshot: RankingSnapshot) {
+  return (
+    snapshot.periods.find((period) => period.id === "legislature") ||
     snapshot.periods.find((period) => period.id === snapshot.defaultPeriod) ||
     snapshot.periods[0]
   );
@@ -490,6 +522,12 @@ export function calculatePublicValueRanking(
     }
     return (points / expenses) * 100_000;
   });
+  const publicVoteRates = deputies.map((deputy) => {
+    const score = deputy.metrics.publicVoteScore;
+    const analyzed = deputy.metrics.publicVotesAnalyzed || 0;
+    if (score === null || score === undefined || analyzed === 0) return null;
+    return perMonth(score, deputy.metrics.monthsInOffice);
+  });
   const attendanceRates = deputies.map((deputy) =>
     perMonth(deputy.metrics.plenaryAttendances, deputy.metrics.monthsInOffice),
   );
@@ -499,12 +537,14 @@ export function calculatePublicValueRanking(
 
   const contributionPercentiles = percentileRanks(contributionRates);
   const efficiencyPercentiles = percentileRanks(efficiencyRates);
+  const publicVotePercentiles = percentileRanks(publicVoteRates);
   const attendancePercentiles = percentileRanks(attendanceRates);
   const votePercentiles = percentileRanks(voteRates);
 
   const scored = deputies.map<PublicValueRankedDeputy>((deputy, index) => {
     const contribution = contributionPercentiles[index];
     const efficiency = efficiencyPercentiles[index];
+    const publicVotes = publicVotePercentiles[index];
     const attendance = attendancePercentiles[index];
     const votes = votePercentiles[index];
     const participation =
@@ -513,10 +553,12 @@ export function calculatePublicValueRanking(
     const eligible =
       deputy.metrics.monthsInOffice >= 3 &&
       contribution !== null &&
+      publicVotes !== null &&
       efficiency !== null &&
       participation !== null;
     const score = eligible
       ? contribution * PUBLIC_VALUE_WEIGHTS.contribution +
+        publicVotes * PUBLIC_VALUE_WEIGHTS.publicVotes +
         efficiency * PUBLIC_VALUE_WEIGHTS.efficiency +
         participation * PUBLIC_VALUE_WEIGHTS.participation +
         transparency * PUBLIC_VALUE_WEIGHTS.transparency
@@ -529,6 +571,7 @@ export function calculatePublicValueRanking(
       score: score === null ? null : Math.round(score),
       dimensions: {
         contribution: contribution === null ? null : Math.round(contribution),
+        publicVotes: publicVotes === null ? null : Math.round(publicVotes),
         efficiency: efficiency === null ? null : Math.round(efficiency),
         participation:
           participation === null ? null : Math.round(participation),
@@ -536,10 +579,12 @@ export function calculatePublicValueRanking(
       },
       labels: buildPublicValueLabels({
         contribution,
+        publicVotes,
         efficiency,
         participation,
         classified: deputy.metrics.publicClassifiedProposals || 0,
         total: deputy.metrics.publicTotalProposals || 0,
+        analyzedVotes: deputy.metrics.publicVotesAnalyzed || 0,
       }),
     };
   });
@@ -565,24 +610,31 @@ export function calculatePublicValueRanking(
 
 function buildPublicValueLabels({
   contribution,
+  publicVotes,
   efficiency,
   participation,
   classified,
   total,
+  analyzedVotes,
 }: {
   contribution: number | null;
+  publicVotes: number | null;
   efficiency: number | null;
   participation: number | null;
   classified: number;
   total: number;
+  analyzedVotes: number;
 }) {
   const labels: string[] = [];
   if (efficiency !== null && efficiency >= 75) labels.push("Eficiente");
   if (contribution !== null && contribution >= 75) labels.push("Impacto alto");
+  if (publicVotes !== null && publicVotes >= 75) labels.push("Votos de alto valor");
+  if (publicVotes !== null && publicVotes <= 25) labels.push("Votos penalizados");
   if (participation !== null && participation >= 75) labels.push("Presente");
   if (participation !== null && participation <= 25) labels.push("Muitas ausências");
   if (contribution !== null && contribution <= 25) labels.push("Baixo retorno");
   if (total > 0 && classified / total < 0.5) labels.push("Classificação parcial");
+  if (analyzedVotes === 0) labels.push("Votos sem análise");
   return labels.slice(0, 3);
 }
 
@@ -666,4 +718,3 @@ export function publicValueScoreBand(
   if (score >= 40) return "low";
   return "very-low";
 }
-import { PUBLIC_VALUE_WEIGHTS } from "@/lib/public-value";
