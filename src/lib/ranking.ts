@@ -50,6 +50,74 @@ export type PeriodDeputyRecord = {
   metrics: RawMetrics;
 };
 
+export type ProfileIdentityDetails = {
+  id: number;
+  birthDate: string | null;
+  birthPlace: string | null;
+  education: string | null;
+  office: string | null;
+  staff: Array<{
+    name: string;
+    role: string;
+    startDate: string | null;
+  }>;
+  assets: Array<{
+    type: string;
+    description: string;
+    value: number;
+  }>;
+};
+
+export type ProfilePeriodDetails = {
+  id: number;
+  expenseCategories: Array<{
+    name: string;
+    total: number;
+    documents: number;
+  }>;
+  suppliers: Array<{
+    name: string;
+    taxId: string | null;
+    total: number;
+    documents: number;
+  }>;
+  largestExpenses: Array<{
+    category: string;
+    supplier: string;
+    date: string;
+    value: number;
+    documentUrl: string | null;
+  }>;
+  proposals: Array<{
+    id: string;
+    type: string;
+    number: string;
+    year: string;
+    date: string;
+    summary: string;
+    status: string;
+    url: string;
+  }>;
+  amendments: Array<{
+    number: string;
+    year: string;
+    type: string;
+    beneficiary: string;
+    proposedValue: number;
+    transferredValue: number;
+  }>;
+};
+
+export type ProfileDetailsSnapshot = {
+  version: 1;
+  generatedAt: string;
+  deputies: ProfileIdentityDetails[];
+  periods: Array<{
+    id: string;
+    deputies: ProfilePeriodDetails[];
+  }>;
+};
+
 export type RankingPeriod = {
   id: string;
   label: string;

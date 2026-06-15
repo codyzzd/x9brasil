@@ -5,6 +5,8 @@ import AdmZip from "adm-zip";
 import type {
   DeputyIdentity,
   PeriodDeputyRecord,
+  ProfileDetailsSnapshot,
+  ProfilePeriodDetails,
   RankingPeriod,
   RankingSnapshot,
   RawMetrics,
@@ -19,6 +21,10 @@ const YEARS = Array.from(
   (_, index) => 2023 + index,
 );
 const OUTPUT = new URL("../src/data/ranking-snapshot.json", import.meta.url);
+const PROFILE_OUTPUT = new URL(
+  "../src/data/profile-details.json",
+  import.meta.url,
+);
 const CHAMBER_API = "https://dadosabertos.camara.leg.br/api/v2";
 const CHAMBER_FILES = "https://dadosabertos.camara.leg.br/arquivos";
 const TSE_FILES = "https://cdn.tse.jus.br/estatistica/sead/odsele";
@@ -61,7 +67,39 @@ type PeriodAccumulator = {
   convertedProposals: Set<string>;
   expensesTotal: number;
   expenseDocuments: number;
-  supplierTotals: Map<string, number>;
+  suppliers: Map<
+    string,
+    { name: string; taxId: string | null; total: number; documents: number }
+  >;
+  expenseCategories: Map<string, { total: number; documents: number }>;
+  largestExpenses: Array<{
+    category: string;
+    supplier: string;
+    date: string;
+    value: number;
+    documentUrl: string | null;
+  }>;
+  proposals: Map<
+    string,
+    {
+      id: string;
+      type: string;
+      number: string;
+      year: string;
+      date: string;
+      summary: string;
+      status: string;
+      url: string;
+    }
+  >;
+  amendments: Array<{
+    number: string;
+    year: string;
+    type: string;
+    beneficiary: string;
+    proposedValue: number;
+    transferredValue: number;
+  }>;
 };
 
 type DeputyAccumulator = {
@@ -74,6 +112,12 @@ type DeputyAccumulator = {
   electionStatus: string | null;
   assetsTotal: number | null;
   assetsCount: number | null;
+  birthDate: string | null;
+  birthPlace: string | null;
+  education: string | null;
+  office: string | null;
+  staff: Array<{ name: string; role: string; startDate: string | null }>;
+  assets: Array<{ type: string; description: string; value: number }>;
 };
 
 type CsvRow = Record<string, string>;
@@ -160,7 +204,11 @@ function emptyPeriod(): PeriodAccumulator {
     convertedProposals: new Set(),
     expensesTotal: 0,
     expenseDocuments: 0,
-    supplierTotals: new Map(),
+    suppliers: new Map(),
+    expenseCategories: new Map(),
+    largestExpenses: [],
+    proposals: new Map(),
+    amendments: [],
   };
 }
 
@@ -333,7 +381,22 @@ async function loadLegislatureDeputies() {
   console.log(`Carregando histórico de ${unique.length} parlamentares`);
   const details = await mapLimit(unique, 8, async (deputy) => {
     const [detail, history] = await Promise.all([
-      fetchJson<{ dados: { nomeCivil: string } }>(
+      fetchJson<{
+        dados: {
+          nomeCivil: string;
+          dataNascimento: string | null;
+          municipioNascimento: string | null;
+          ufNascimento: string | null;
+          escolaridade: string | null;
+          ultimoStatus: {
+            gabinete: {
+              nome: string | null;
+              predio: string | null;
+              sala: string | null;
+            };
+          };
+        };
+      }>(
         `${CHAMBER_API}/deputados/${deputy.id}`,
       ),
       fetchJson<{ dados: DeputyStatus[] }>(
@@ -344,11 +407,28 @@ async function loadLegislatureDeputies() {
       deputy,
       civilName: detail.dados.nomeCivil,
       intervals: buildIntervals(history.dados),
+      birthDate: detail.dados.dataNascimento,
+      birthPlace: [detail.dados.municipioNascimento, detail.dados.ufNascimento]
+        .filter(Boolean)
+        .join("/") || null,
+      education: detail.dados.escolaridade,
+      office: detail.dados.ultimoStatus.gabinete.nome
+        ? `Gabinete ${detail.dados.ultimoStatus.gabinete.nome}, prédio ${detail.dados.ultimoStatus.gabinete.predio || "N/D"}`
+        : null,
     };
   });
 
   return new Map(
-    details.map(({ deputy, civilName, intervals }) => {
+    details.map(
+      ({
+        deputy,
+        civilName,
+        intervals,
+        birthDate,
+        birthPlace,
+        education,
+        office,
+      }) => {
       const accumulator: DeputyAccumulator = {
         deputy,
         civilName,
@@ -359,10 +439,17 @@ async function loadLegislatureDeputies() {
         electionStatus: null,
         assetsTotal: null,
         assetsCount: null,
+        birthDate,
+        birthPlace,
+        education,
+        office,
+        staff: [],
+        assets: [],
       };
       addExercisePeriods(accumulator);
       return [deputy.id, accumulator];
-    }),
+      },
+    ),
   );
 }
 
@@ -418,7 +505,18 @@ async function loadParticipation(accumulators: Map<number, DeputyAccumulator>) {
 }
 
 async function loadProduction(accumulators: Map<number, DeputyAccumulator>) {
-  const proposals = new Map<string, { type: string; date: string | null }>();
+  const proposals = new Map<
+    string,
+    {
+      type: string;
+      number: string;
+      year: string;
+      date: string | null;
+      summary: string;
+      status: string;
+      url: string;
+    }
+  >();
   for (const year of YEARS) {
     await forEachRemoteCsv(
       `${CHAMBER_FILES}/proposicoes/csv/proposicoes-${year}.csv`,
@@ -426,7 +524,15 @@ async function loadProduction(accumulators: Map<number, DeputyAccumulator>) {
         if (substantiveTypes.has(row.siglaTipo) || oversightTypes.has(row.siglaTipo)) {
           proposals.set(row.id, {
             type: row.siglaTipo,
+            number: row.numero,
+            year: row.ano,
             date: dateOnly(row.dataApresentacao),
+            summary: row.ementa || "Ementa não informada",
+            status:
+              row.ultimoStatus_descricaoSituacao ||
+              row.ultimoStatus_descricaoTramitacao ||
+              "Situação não informada",
+            url: `https://www.camara.leg.br/propostas-legislativas/${row.id}`,
           });
         }
       },
@@ -450,6 +556,16 @@ async function loadProduction(accumulators: Map<number, DeputyAccumulator>) {
           } else {
             period.oversightProposals.add(row.idProposicao);
           }
+          period.proposals.set(row.idProposicao, {
+            id: row.idProposicao,
+            type: proposal.type,
+            number: proposal.number,
+            year: proposal.year,
+            date: proposal.date || `${proposal.year}-01-01`,
+            summary: proposal.summary,
+            status: proposal.status,
+            url: proposal.url,
+          });
         });
       },
     );
@@ -469,6 +585,11 @@ async function loadProduction(accumulators: Map<number, DeputyAccumulator>) {
           .toLocaleLowerCase("pt-BR");
         forDatePeriods(accumulator, dateOnly(row.dataHora), (period) => {
           period.advancedProposals.add(proposalId);
+          const stored = period.proposals.get(proposalId);
+          if (stored) {
+            stored.status =
+              row.descricaoTramitacao || row.despacho || stored.status;
+          }
           if (/transformad|convertid/.test(text) && /norma|lei/.test(text)) {
             period.convertedProposals.add(proposalId);
           }
@@ -490,14 +611,40 @@ async function loadExpenses(accumulators: Map<number, DeputyAccumulator>) {
       const date = dateOnly(row.datEmissao);
       const amount = numberFrom(row.vlrLiquido);
       if (!accumulator || !date || amount <= 0) return;
-      const supplier = normalize(row.txtCNPJCPF || row.txtFornecedor || "NAO INFORMADO");
+      const supplierKey = normalize(
+        row.txtCNPJCPF || row.txtFornecedor || "NAO INFORMADO",
+      );
+      const supplierName = row.txtFornecedor || "Fornecedor não informado";
+      const taxId = row.txtCNPJCPF || null;
+      const category = row.txtDescricao || "Categoria não informada";
       forDatePeriods(accumulator, date, (period) => {
         period.expensesTotal += amount;
         period.expenseDocuments += 1;
-        period.supplierTotals.set(
-          supplier,
-          (period.supplierTotals.get(supplier) || 0) + amount,
-        );
+        const supplier = period.suppliers.get(supplierKey) || {
+          name: supplierName,
+          taxId,
+          total: 0,
+          documents: 0,
+        };
+        supplier.total += amount;
+        supplier.documents += 1;
+        period.suppliers.set(supplierKey, supplier);
+        const categoryTotal = period.expenseCategories.get(category) || {
+          total: 0,
+          documents: 0,
+        };
+        categoryTotal.total += amount;
+        categoryTotal.documents += 1;
+        period.expenseCategories.set(category, categoryTotal);
+        period.largestExpenses.push({
+          category,
+          supplier: supplierName,
+          date,
+          value: amount,
+          documentUrl: row.urlDocumento || null,
+        });
+        period.largestExpenses.sort((a, b) => b.value - a.value);
+        if (period.largestExpenses.length > 10) period.largestExpenses.length = 10;
       });
     });
   }
@@ -544,9 +691,71 @@ async function loadTse(accumulators: Map<number, DeputyAccumulator>) {
   await forEachBufferCsv(assetsEntry.getData(), "latin1", (row) => {
     const accumulator = bySequence.get(row.SQ_CANDIDATO);
     if (!accumulator) return;
+    const value = numberFrom(row.VR_BEM_CANDIDATO);
     accumulator.assetsTotal =
-      (accumulator.assetsTotal || 0) + numberFrom(row.VR_BEM_CANDIDATO);
+      (accumulator.assetsTotal || 0) + value;
     accumulator.assetsCount = (accumulator.assetsCount || 0) + 1;
+    accumulator.assets.push({
+      type: row.DS_TIPO_BEM_CANDIDATO || "Bem declarado",
+      description: row.DS_BEM_CANDIDATO || "Descrição não informada",
+      value,
+    });
+  });
+}
+
+async function loadStaff(accumulators: Map<number, DeputyAccumulator>) {
+  await forEachRemoteCsv(
+    `${CHAMBER_FILES}/funcionarios/csv/funcionarios.csv`,
+    (row) => {
+      if (row.codGrupo !== "6") return;
+      const deputyId = Number(row.uriLotacao?.split("/").pop());
+      const accumulator = accumulators.get(deputyId);
+      if (!accumulator) return;
+      accumulator.staff.push({
+        name: row.nome,
+        role: row.cargo || "Secretário parlamentar",
+        startDate: dateOnly(row.dataInicioHistorico || row.dataNomeacao),
+      });
+    },
+  );
+}
+
+async function loadAmendments(accumulators: Map<number, DeputyAccumulator>) {
+  const byName = new Map<string, DeputyAccumulator[]>();
+  for (const accumulator of accumulators.values()) {
+    for (const name of [accumulator.civilName, accumulator.deputy.nome]) {
+      const key = normalize(name);
+      const matches = byName.get(key) || [];
+      if (!matches.includes(accumulator)) matches.push(accumulator);
+      byName.set(key, matches);
+    }
+  }
+  const zip = new AdmZip(
+    await fetchBuffer(
+      "https://repositorio.dados.gov.br/seges/detru/siconv_emenda.csv.zip",
+    ),
+  );
+  const entry = zip.getEntries().find((candidate) =>
+    candidate.entryName.endsWith(".csv"),
+  );
+  if (!entry) throw new Error("CSV de emendas do Transferegov não encontrado");
+  await forEachBufferCsv(entry.getData(), "utf8", (row) => {
+    const matches = byName.get(normalize(row.NOME_PARLAMENTAR || ""));
+    if (!matches || matches.length !== 1) return;
+    const year = row.COD_PROGRAMA_EMENDA?.match(/20\d{2}/)?.[0];
+    if (!year || !YEARS.includes(Number(year))) return;
+    const amendment = {
+      number: row.NR_EMENDA || "Número não informado",
+      year,
+      type: row.TIPO_PARLAMENTAR || "Tipo não informado",
+      beneficiary: row.BENEFICIARIO_EMENDA || "Beneficiário não informado",
+      proposedValue: numberFrom(row.VALOR_REPASSE_PROPOSTA_EMENDA),
+      transferredValue: numberFrom(row.VALOR_REPASSE_EMENDA),
+    };
+    for (const periodId of [year, "legislature"]) {
+      const period = matches[0].periods.get(periodId);
+      if (period) period.amendments.push(amendment);
+    }
   });
 }
 
@@ -564,8 +773,8 @@ function buildPeriodDeputy(
     period.expenseDocuments > 0 ? period.expensesTotal : null;
   const supplierConcentration =
     expensesTotal && expensesTotal > 0
-      ? [...period.supplierTotals.values()].reduce(
-          (sum, amount) => sum + (amount / expensesTotal) ** 2,
+      ? [...period.suppliers.values()].reduce(
+          (sum, supplier) => sum + (supplier.total / expensesTotal) ** 2,
           0,
         )
       : null;
@@ -594,6 +803,34 @@ function buildPeriodDeputy(
     officeEnd: period.officeEnd,
     daysInOffice: period.daysInOffice,
     metrics,
+  };
+}
+
+function buildProfilePeriod(
+  item: DeputyAccumulator,
+  period: PeriodAccumulator,
+): ProfilePeriodDetails {
+  return {
+    id: item.deputy.id,
+    expenseCategories: [...period.expenseCategories.entries()]
+      .map(([name, values]) => ({ name, ...values }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10),
+    suppliers: [...period.suppliers.values()]
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10),
+    largestExpenses: [...period.largestExpenses],
+    proposals: [...period.proposals.values()]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 10),
+    amendments: [...period.amendments]
+      .sort(
+        (a, b) =>
+          b.transferredValue +
+          b.proposedValue -
+          (a.transferredValue + a.proposedValue),
+      )
+      .slice(0, 10),
   };
 }
 
@@ -644,6 +881,31 @@ function buildSnapshot(accumulators: Map<number, DeputyAccumulator>): RankingSna
   };
 }
 
+function buildProfileDetails(
+  accumulators: Map<number, DeputyAccumulator>,
+): ProfileDetailsSnapshot {
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    deputies: [...accumulators.values()].map((item) => ({
+      id: item.deputy.id,
+      birthDate: item.birthDate,
+      birthPlace: item.birthPlace,
+      education: item.education,
+      office: item.office,
+      staff: item.staff.sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+      assets: item.assets.sort((a, b) => b.value - a.value),
+    })),
+    periods: PERIODS.filter((definition) => definition.id !== "legislature").map((definition) => ({
+      id: definition.id,
+      deputies: [...accumulators.values()].flatMap((item) => {
+        const period = item.periods.get(definition.id);
+        return period ? [buildProfilePeriod(item, period)] : [];
+      }),
+    })),
+  };
+}
+
 async function main() {
   console.log(`Sincronizando a ${LEGISLATURE}ª legislatura até ${PERIOD_END}`);
   const accumulators = await loadLegislatureDeputies();
@@ -651,9 +913,16 @@ async function main() {
   await loadProduction(accumulators);
   await loadExpenses(accumulators);
   await loadTse(accumulators);
+  await loadStaff(accumulators);
+  await loadAmendments(accumulators);
   const snapshot = buildSnapshot(accumulators);
+  const profileDetails = buildProfileDetails(accumulators);
   await mkdir(new URL("../src/data", import.meta.url), { recursive: true });
   await writeFile(OUTPUT, `${JSON.stringify(snapshot, null, 2)}\n`);
+  await writeFile(
+    PROFILE_OUTPUT,
+    `${JSON.stringify(profileDetails)}\n`,
+  );
   console.log(
     `Snapshot v2 salvo com ${snapshot.deputies.length} parlamentares e ${snapshot.periods.length} períodos`,
   );

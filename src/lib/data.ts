@@ -11,6 +11,7 @@ export function getDeputy(slug: string) {
   return rankingSnapshot.deputies.find((deputy) => deputy.slug === slug);
 }
 
+
 export function getPeriodDeputies(periodId: string) {
   return materializePeriod(rankingSnapshot, periodId);
 }

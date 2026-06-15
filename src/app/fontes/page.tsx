@@ -36,6 +36,12 @@ const sources = [
       "Fonte oficial prevista para receitas, despesas e situação das contas eleitorais.",
     url: "https://divulgacandcontas.tse.jus.br/",
   },
+  {
+    name: "Transferegov",
+    description:
+      "Emendas parlamentares, beneficiários e valores de repasse vinculados ao parlamentar.",
+    url: "https://repositorio.dados.gov.br/seges/detru/",
+  },
 ];
 
 export default function SourcesPage() {
@@ -60,7 +66,7 @@ export default function SourcesPage() {
             .
           </p>
 
-          <div className="mt-10 grid gap-5 sm:grid-cols-3">
+          <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {sources.map((source) => (
               <Card key={source.name}>
                 <CardHeader>
@@ -106,7 +112,9 @@ export default function SourcesPage() {
                 "Proposições e autores",
                 "Tramitações por ano",
                 "Histórico de exercício parlamentar",
+                "Funcionários e lotações dos gabinetes",
                 "Cota parlamentar",
+                "Emendas parlamentares do Transferegov",
                 "Candidaturas 2022",
                 "Bens declarados 2022",
               ].map((item) => (
