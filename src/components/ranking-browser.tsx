@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { Filter, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,11 +11,14 @@ import {
   SheetContent,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from "@/components/ui/sheet";
 import {
   calculateRanking,
+  calculateRankChanges,
   filterRankingCohort,
+  getRankingPeriod,
+  materializePeriod,
+  previousAnnualPeriod,
   searchRankedDeputies,
   type RankingSnapshot,
 } from "@/lib/ranking";
@@ -27,27 +31,48 @@ const PAGE_SIZE = 20;
 
 export function RankingBrowser({
   snapshot,
-  states,
-  parties,
   initialState = "all",
   initialParty = "all",
+  initialPeriod,
 }: {
   snapshot: RankingSnapshot;
-  states: string[];
-  parties: string[];
   initialState?: string;
   initialParty?: string;
+  initialPeriod: string;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [query, setQuery] = useState("");
+  const [period, setPeriod] = useState(initialPeriod);
   const [state, setState] = useState(initialState);
   const [party, setParty] = useState(initialParty);
   const [order, setOrder] = useState<RankingOrder>("score");
   const [visible, setVisible] = useState(PAGE_SIZE);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
+  const periodDefinition = getRankingPeriod(snapshot, period);
+  const periodDeputies = useMemo(
+    () => materializePeriod(snapshot, period),
+    [period, snapshot],
+  );
+  const states = useMemo(
+    () =>
+      Array.from(new Set(periodDeputies.map((deputy) => deputy.state))).sort(
+        (a, b) => a.localeCompare(b, "pt-BR"),
+      ),
+    [periodDeputies],
+  );
+  const parties = useMemo(
+    () =>
+      Array.from(new Set(periodDeputies.map((deputy) => deputy.party))).sort(
+        (a, b) => a.localeCompare(b, "pt-BR"),
+      ),
+    [periodDeputies],
+  );
   const cohort = useMemo(
     () =>
-      filterRankingCohort(snapshot.deputies, state, party),
-    [party, snapshot.deputies, state],
+      filterRankingCohort(periodDeputies, state, party),
+    [party, periodDeputies, state],
   );
 
   const ranked = useMemo(() => {
@@ -59,6 +84,27 @@ export function RankingBrowser({
       return difference || a.name.localeCompare(b.name, "pt-BR");
     });
   }, [cohort, order]);
+
+  const previousPeriod = previousAnnualPeriod(snapshot, period);
+  const previousRanked = useMemo(() => {
+    if (!previousPeriod) return null;
+    return calculateRanking(
+      filterRankingCohort(
+        materializePeriod(snapshot, previousPeriod.id),
+        state,
+        party,
+      ),
+    );
+  }, [party, previousPeriod, snapshot, state]);
+  const rankChanges = useMemo(
+    () =>
+      calculateRankChanges(
+        ranked,
+        previousRanked,
+        previousPeriod?.label || null,
+      ),
+    [previousPeriod?.label, previousRanked, ranked],
+  );
 
   const searched = useMemo(() => {
     return searchRankedDeputies(ranked, query);
@@ -72,12 +118,20 @@ export function RankingBrowser({
           eligible.reduce((sum, deputy) => sum + (deputy.score || 0), 0) /
             eligible.length,
         );
-  const context = new URLSearchParams();
-  if (state !== "all") context.set("uf", state);
-  if (party !== "all") context.set("partido", party);
-  const contextQuery = context.size ? `?${context.toString()}` : "";
+  const contextQuery = useMemo(() => {
+    const context = new URLSearchParams();
+    context.set("periodo", period);
+    if (state !== "all") context.set("uf", state);
+    if (party !== "all") context.set("partido", party);
+    return `?${context.toString()}`;
+  }, [party, period, state]);
+
+  useEffect(() => {
+    router.replace(`${pathname}${contextQuery}`, { scroll: false });
+  }, [contextQuery, pathname, router]);
 
   const reset = () => {
+    setPeriod(snapshot.defaultPeriod);
     setState("all");
     setParty("all");
     setOrder("score");
@@ -86,11 +140,24 @@ export function RankingBrowser({
 
   const filters = (
     <RankingFilters
+      period={period}
       state={state}
       party={party}
       order={order}
+      periods={snapshot.periods.map(({ id, label, partial, end }) => ({
+        id,
+        label,
+        partial,
+        end,
+      }))}
       states={states}
       parties={parties}
+      onPeriodChange={(value) => {
+        setPeriod(value);
+        setState("all");
+        setParty("all");
+        setVisible(PAGE_SIZE);
+      }}
       onStateChange={(value) => {
         setState(value);
         setVisible(PAGE_SIZE);
@@ -127,14 +194,14 @@ export function RankingBrowser({
               aria-label="Buscar deputado"
             />
           </div>
-          <Sheet>
-            <SheetTrigger
-              render={
-                <Button variant="outline" className="lg:hidden">
-                  <Filter className="size-4" /> Filtros
-                </Button>
-              }
-            />
+          <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
+            <Button
+              variant="outline"
+              className="lg:hidden"
+              onClick={() => setFiltersOpen(true)}
+            >
+              <Filter className="size-4" /> Filtros
+            </Button>
             <SheetContent side="left">
               <SheetHeader>
                 <SheetTitle>Filtrar ranking</SheetTitle>
@@ -156,7 +223,7 @@ export function RankingBrowser({
           <Summary
             label="Atualizado em"
             value={new Intl.DateTimeFormat("pt-BR").format(
-              new Date(`${snapshot.period.end}T12:00:00`),
+              new Date(`${periodDefinition.end}T12:00:00`),
             )}
           />
         </div>
@@ -168,7 +235,12 @@ export function RankingBrowser({
               {party === "all" ? "" : ` · ${party}`}
             </h2>
             <p className="text-sm text-muted-foreground">
-              {searched.length} resultados · legislatura atual
+              {searched.length} resultados · {periodDefinition.label}
+              {periodDefinition.partial
+                ? `, dados até ${new Intl.DateTimeFormat("pt-BR").format(
+                    new Date(`${periodDefinition.end}T12:00:00`),
+                  )}`
+                : ""}
             </p>
           </div>
           <p className="text-xs text-muted-foreground">
@@ -179,6 +251,7 @@ export function RankingBrowser({
         <RankingTable
           deputies={searched.slice(0, visible)}
           contextQuery={contextQuery}
+          rankChanges={rankChanges}
         />
 
         {visible < searched.length && (

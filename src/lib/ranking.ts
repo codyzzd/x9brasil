@@ -26,13 +26,11 @@ export type RawMetrics = {
   accountsStatusAvailable: boolean;
 };
 
-export type DeputyRecord = {
+export type DeputyIdentity = {
   id: number;
   slug: string;
   name: string;
   civilName: string;
-  party: string;
-  state: string;
   photoUrl: string;
   chamberUrl: string;
   electionNumber: string | null;
@@ -40,25 +38,42 @@ export type DeputyRecord = {
   electionStatus: string | null;
   assetsTotal: number | null;
   assetsCount: number | null;
+};
+
+export type PeriodDeputyRecord = {
+  id: number;
+  party: string;
+  state: string;
   officeStart: string;
+  officeEnd: string;
+  daysInOffice: number;
   metrics: RawMetrics;
 };
 
+export type RankingPeriod = {
+  id: string;
+  label: string;
+  start: string;
+  end: string;
+  partial: boolean;
+  deputies: PeriodDeputyRecord[];
+};
+
 export type RankingSnapshot = {
-  version: 1;
+  version: 2;
   generatedAt: string;
-  period: {
-    start: string;
-    end: string;
-    timezone: "America/Fortaleza";
-  };
+  timezone: "America/Fortaleza";
+  defaultPeriod: string;
   sources: Array<{
     name: string;
     url: string;
     updatedAt: string;
   }>;
-  deputies: DeputyRecord[];
+  deputies: DeputyIdentity[];
+  periods: RankingPeriod[];
 };
+
+export type DeputyRecord = DeputyIdentity & PeriodDeputyRecord;
 
 export type ScoreDimensions = {
   participation: number | null;
@@ -74,6 +89,70 @@ export type RankedDeputy = DeputyRecord & {
   dimensions: ScoreDimensions;
   labels: string[];
 };
+
+export type RankChange = {
+  currentRank: number | null;
+  previousRank: number | null;
+  delta: number | null;
+  previousPeriod: string | null;
+};
+
+export function getRankingPeriod(snapshot: RankingSnapshot, periodId: string) {
+  return (
+    snapshot.periods.find((period) => period.id === periodId) ||
+    snapshot.periods.find((period) => period.id === snapshot.defaultPeriod) ||
+    snapshot.periods[0]
+  );
+}
+
+export function materializePeriod(
+  snapshot: RankingSnapshot,
+  periodId: string,
+): DeputyRecord[] {
+  const period = getRankingPeriod(snapshot, periodId);
+  if (!period) return [];
+  const identities = new Map(snapshot.deputies.map((deputy) => [deputy.id, deputy]));
+  return period.deputies.flatMap((periodDeputy) => {
+    const identity = identities.get(periodDeputy.id);
+    return identity ? [{ ...identity, ...periodDeputy }] : [];
+  });
+}
+
+export function previousAnnualPeriod(
+  snapshot: RankingSnapshot,
+  periodId: string,
+) {
+  const year = Number(periodId);
+  if (!Number.isInteger(year)) return null;
+  return snapshot.periods.find((period) => period.id === String(year - 1)) || null;
+}
+
+export function calculateRankChanges(
+  current: RankedDeputy[],
+  previous: RankedDeputy[] | null,
+  previousPeriod: string | null,
+) {
+  const previousRanks = new Map(
+    (previous || []).map((deputy) => [deputy.id, deputy.rank]),
+  );
+  return new Map<number, RankChange>(
+    current.map((deputy) => {
+      const previousRank = previousRanks.get(deputy.id) ?? null;
+      return [
+        deputy.id,
+        {
+          currentRank: deputy.rank,
+          previousRank,
+          delta:
+            deputy.rank === null || previousRank === null
+              ? null
+              : previousRank - deputy.rank,
+          previousPeriod,
+        },
+      ];
+    }),
+  );
+}
 
 export function filterRankingCohort(
   deputies: DeputyRecord[],

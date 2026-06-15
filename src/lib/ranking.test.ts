@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   calculateRanking,
+  calculateRankChanges,
   filterRankingCohort,
+  materializePeriod,
   percentileRanks,
   SCORE_WEIGHTS,
   searchRankedDeputies,
   scoreBand,
   type DeputyRecord,
+  type RankingSnapshot,
 } from "./ranking";
 
 const deputy = (
@@ -28,6 +31,8 @@ const deputy = (
   assetsTotal: null,
   assetsCount: null,
   officeStart: "2023-02-01",
+  officeEnd: "2023-12-31",
+  daysInOffice: 334,
   metrics: {
     monthsInOffice: 40,
     plenaryAttendances: id * 10,
@@ -110,4 +115,61 @@ test("score bands follow the traffic-light thresholds", () => {
   assert.equal(scoreBand(50), "medium");
   assert.equal(scoreBand(64), "medium");
   assert.equal(scoreBand(65), "good");
+});
+
+test("materializes identities with metrics from the selected period", () => {
+  const record = deputy(1);
+  const snapshot: RankingSnapshot = {
+    version: 2,
+    generatedAt: "2026-06-15T00:00:00.000Z",
+    timezone: "America/Fortaleza",
+    defaultPeriod: "2026",
+    sources: [],
+    deputies: [
+      {
+        id: record.id,
+        slug: record.slug,
+        name: record.name,
+        civilName: record.civilName,
+        photoUrl: record.photoUrl,
+        chamberUrl: record.chamberUrl,
+        electionNumber: record.electionNumber,
+        tseSequence: record.tseSequence,
+        electionStatus: record.electionStatus,
+        assetsTotal: record.assetsTotal,
+        assetsCount: record.assetsCount,
+      },
+    ],
+    periods: [
+      {
+        id: "2026",
+        label: "2026",
+        start: "2026-01-01",
+        end: "2026-06-15",
+        partial: true,
+        deputies: [
+          {
+            id: record.id,
+            party: record.party,
+            state: record.state,
+            officeStart: record.officeStart,
+            officeEnd: record.officeEnd,
+            daysInOffice: record.daysInOffice,
+            metrics: record.metrics,
+          },
+        ],
+      },
+    ],
+  };
+  assert.equal(materializePeriod(snapshot, "2026")[0].name, record.name);
+  assert.equal(materializePeriod(snapshot, "2026")[0].party, record.party);
+});
+
+test("rank change is positive when the deputy moves up", () => {
+  const previousDeputy = calculateRanking([deputy(1), deputy(2)])[0];
+  const currentDeputy = calculateRanking([deputy(1), deputy(2)])[0];
+  const previous = [{ ...previousDeputy, rank: 8 }];
+  const current = [{ ...currentDeputy, rank: 3 }];
+  const changes = calculateRankChanges(current, previous, "2025");
+  assert.equal(changes.get(currentDeputy.id)?.delta, 5);
 });

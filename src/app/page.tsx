@@ -3,14 +3,20 @@ import { RankingBrowser } from "@/components/ranking-browser";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Badge } from "@/components/ui/badge";
-import { parties, rankingSnapshot, states } from "@/lib/data";
+import {
+  getPeriodFacets,
+  rankingSnapshot,
+  resolvePeriod,
+} from "@/lib/data";
 
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ uf?: string; partido?: string }>;
+  searchParams: Promise<{ uf?: string; partido?: string; periodo?: string }>;
 }) {
   const context = await searchParams;
+  const initialPeriod = resolvePeriod(context.periodo);
+  const { states, parties } = getPeriodFacets(initialPeriod.id);
   const initialState = context.uf && states.includes(context.uf) ? context.uf : "all";
   const initialParty =
     context.partido && parties.includes(context.partido) ? context.partido : "all";
@@ -48,10 +54,9 @@ export default async function Home({
           </div>
           <RankingBrowser
             snapshot={rankingSnapshot}
-            states={states}
-            parties={parties}
             initialState={initialState}
             initialParty={initialParty}
+            initialPeriod={initialPeriod.id}
           />
         </div>
       </main>

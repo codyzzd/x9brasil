@@ -4,6 +4,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   ArrowLeft,
+  ArrowDown,
+  ArrowUp,
   CalendarDays,
   ExternalLink,
   FileCheck2,
@@ -28,13 +30,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getDeputy, rankingSnapshot } from "@/lib/data";
 import {
   calculateRanking,
+  calculateRankChanges,
+  filterRankingCohort,
   formatCurrency,
+  getRankingPeriod,
+  materializePeriod,
+  previousAnnualPeriod,
+  type RankChange,
 } from "@/lib/ranking";
 import { cn } from "@/lib/utils";
 
 type PageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ uf?: string; partido?: string }>;
+  searchParams: Promise<{ uf?: string; partido?: string; periodo?: string }>;
 };
 
 export function generateStaticParams() {
@@ -56,17 +64,53 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
   if (!deputy) notFound();
 
   const context = await searchParams;
-  const cohort = rankingSnapshot.deputies.filter(
-    (item) =>
-      (!context.uf || item.state === context.uf) &&
-      (!context.partido || item.party === context.partido),
+  const period = getRankingPeriod(
+    rankingSnapshot,
+    context.periodo || rankingSnapshot.defaultPeriod,
+  );
+  const periodDeputies = materializePeriod(rankingSnapshot, period.id);
+  const cohort = filterRankingCohort(
+    periodDeputies,
+    context.uf || "all",
+    context.partido || "all",
   );
   const ranked =
     calculateRanking(cohort).find((item) => item.id === deputy.id) ||
-    calculateRanking(rankingSnapshot.deputies).find((item) => item.id === deputy.id);
+    calculateRanking(periodDeputies).find((item) => item.id === deputy.id);
   if (!ranked) notFound();
 
+  const previousPeriod = previousAnnualPeriod(rankingSnapshot, period.id);
+  const previousRanked = previousPeriod
+    ? calculateRanking(
+        filterRankingCohort(
+          materializePeriod(rankingSnapshot, previousPeriod.id),
+          context.uf || "all",
+          context.partido || "all",
+        ),
+      )
+    : null;
+  const rankChange = calculateRankChanges(
+    [ranked],
+    previousRanked,
+    previousPeriod?.label || null,
+  ).get(ranked.id);
+  const annualHistory = rankingSnapshot.periods
+    .filter((item) => /^\d{4}$/.test(item.id))
+    .sort((a, b) => Number(a.id) - Number(b.id))
+    .map((item) => {
+      const itemRanking = calculateRanking(
+        filterRankingCohort(
+          materializePeriod(rankingSnapshot, item.id),
+          context.uf || "all",
+          context.partido || "all",
+        ),
+      ).find((candidate) => candidate.id === deputy.id);
+      return { period: item, ranked: itemRanking || null };
+    });
+  const partialAnnualPeriod = annualHistory.find((item) => item.period.partial)?.period;
+
   const back = new URLSearchParams();
+  back.set("periodo", period.id);
   if (context.uf) back.set("uf", context.uf);
   if (context.partido) back.set("partido", context.partido);
 
@@ -125,7 +169,53 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
                   {ranked.rank ? `${ranked.rank}º na coorte` : "Sem posição"}
                 </p>
                 <SemanticScore value={ranked.score} className="mt-2 w-full justify-center" />
+                <ProfileRankTrend change={rankChange} />
               </div>
+            </CardContent>
+          </Card>
+
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>Evolução anual</CardTitle>
+              <CardDescription>
+                Posição e score recalculados na mesma coorte de estado e partido.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <div className="grid min-w-[720px] grid-cols-[80px_90px_90px_repeat(4,1fr)] gap-3 border-b pb-2 text-xs font-medium text-muted-foreground">
+                  <span>Ano</span>
+                  <span>Posição</span>
+                  <span>Score</span>
+                  <span>Participação</span>
+                  <span>Produção</span>
+                  <span>Recursos</span>
+                  <span>Transparência</span>
+                </div>
+                {annualHistory.map(({ period: item, ranked: history }) => (
+                  <div
+                    key={item.id}
+                    className="grid min-w-[720px] grid-cols-[80px_90px_90px_repeat(4,1fr)] gap-3 border-b py-3 text-sm tabular-nums last:border-0"
+                  >
+                    <span className="font-medium">
+                      {item.label}
+                      {item.partial ? "*" : ""}
+                    </span>
+                    <span>{history?.rank ? `${history.rank}º` : "—"}</span>
+                    <span>{history?.score ?? "—"}</span>
+                    <span>{history?.dimensions.participation ?? "—"}</span>
+                    <span>{history?.dimensions.production ?? "—"}</span>
+                    <span>{history?.dimensions.resources ?? "—"}</span>
+                    <span>{history?.dimensions.transparency ?? "—"}</span>
+                  </div>
+                ))}
+              </div>
+              {partialAnnualPeriod && (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  * Ano em andamento, com dados até{" "}
+                  {formatDate(partialAnnualPeriod.end)}.
+                </p>
+              )}
             </CardContent>
           </Card>
 
@@ -194,7 +284,7 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
                     <MetricCard
                       label="Meses em exercício"
                       value={Number(ranked.metrics.monthsInOffice.toFixed(1))}
-                      detail={`Período até ${formatDate(rankingSnapshot.period.end)}`}
+                      detail={`Período de ${formatDate(period.start)} a ${formatDate(period.end)}`}
                     />
                   </CardContent>
                 </Card>
@@ -337,7 +427,7 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
                   <p className="mt-2 text-muted-foreground text-pretty">
                     {context.uf || context.partido
                       ? `Comparado com ${cohort.length} deputados do grupo selecionado.`
-                      : `Comparado com os ${cohort.length} deputados federais atuais.`}
+                      : `Comparado com ${cohort.length} deputados em exercício no período.`}
                   </p>
                 </CardContent>
               </Card>
@@ -367,6 +457,34 @@ function MetricCard({
       </p>
       <p className="mt-2 text-xs text-muted-foreground">{detail}</p>
     </div>
+  );
+}
+
+function ProfileRankTrend({ change }: { change?: RankChange }) {
+  if (!change?.previousPeriod || change.delta === null) {
+    return (
+      <p className="mt-2 text-xs text-muted-foreground">Sem comparação anual</p>
+    );
+  }
+  if (change.delta === 0) {
+    return (
+      <p className="mt-2 text-xs text-muted-foreground">
+        Manteve a posição desde {change.previousPeriod}
+      </p>
+    );
+  }
+  const improved = change.delta > 0;
+  const Icon = improved ? ArrowUp : ArrowDown;
+  return (
+    <p
+      className={cn(
+        "mt-2 inline-flex items-center gap-1 text-xs font-medium",
+        improved ? "text-emerald-600" : "text-red-600",
+      )}
+    >
+      <Icon className="size-3.5" />
+      {Math.abs(change.delta)} posições desde {change.previousPeriod}
+    </p>
   );
 }
 

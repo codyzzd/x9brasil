@@ -137,11 +137,11 @@ export default function MethodologyPage() {
               />
               <Method
                 title="Coorte"
-                text="Estado e partido selecionados definem quem participa do cálculo. A busca por nome só reduz a lista visível e não recalcula as notas."
+                text="Período, estado e partido selecionados definem quem participa do cálculo. A busca por nome só reduz a lista visível e não recalcula as notas."
               />
               <Method
                 title="Elegibilidade"
-                text="Mandatos com menos de 90 dias ou sem uma das dimensões operacionais aparecem sem posição, e dados ausentes nunca são transformados em zero."
+                text="Em cada ano, mandatos com menos de 90 dias ou sem uma das dimensões operacionais aparecem sem posição. Anos em andamento são identificados como parciais, e dados ausentes nunca são transformados em zero."
               />
             </CardContent>
           </Card>

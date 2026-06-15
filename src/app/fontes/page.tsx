@@ -55,7 +55,7 @@ export default function SourcesPage() {
             {new Intl.DateTimeFormat("pt-BR", {
               dateStyle: "long",
               timeStyle: "short",
-              timeZone: rankingSnapshot.period.timezone,
+              timeZone: rankingSnapshot.timezone,
             }).format(new Date(rankingSnapshot.generatedAt))}
             .
           </p>
@@ -89,8 +89,14 @@ export default function SourcesPage() {
                 <FileArchive className="size-5" /> Conjuntos processados
               </CardTitle>
               <CardDescription>
-                Período de {formatDate(rankingSnapshot.period.start)} a{" "}
-                {formatDate(rankingSnapshot.period.end)}.
+                Cobertura histórica de{" "}
+                {formatDate(rankingSnapshot.periods[0].start)} a{" "}
+                {formatDate(
+                  rankingSnapshot.periods.find(
+                    (period) => period.id === rankingSnapshot.defaultPeriod,
+                  )?.end || rankingSnapshot.periods[0].end,
+                )}
+                .
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
@@ -98,6 +104,8 @@ export default function SourcesPage() {
                 "Eventos e presenças",
                 "Votos individuais",
                 "Proposições e autores",
+                "Tramitações por ano",
+                "Histórico de exercício parlamentar",
                 "Cota parlamentar",
                 "Candidaturas 2022",
                 "Bens declarados 2022",

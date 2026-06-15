@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, SearchX } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, Minus, SearchX } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/table";
 import {
   formatCurrency,
+  type RankChange,
   type RankedDeputy,
 } from "@/lib/ranking";
 import { cn } from "@/lib/utils";
@@ -24,9 +25,11 @@ import { SemanticScore } from "./semantic-score";
 export function RankingTable({
   deputies,
   contextQuery,
+  rankChanges,
 }: {
   deputies: RankedDeputy[];
   contextQuery: string;
+  rankChanges: Map<number, RankChange>;
 }) {
   if (deputies.length === 0) {
     return (
@@ -59,8 +62,11 @@ export function RankingTable({
           <TableBody>
             {deputies.map((deputy) => (
               <TableRow key={deputy.id}>
-                <TableCell className="text-center text-xl font-semibold tabular-nums">
-                  {deputy.rank ?? "—"}
+                <TableCell className="text-center">
+                  <p className="text-xl font-semibold tabular-nums">
+                    {deputy.rank ?? "—"}
+                  </p>
+                  <RankTrend change={rankChanges.get(deputy.id)} compact />
                 </TableCell>
                 <TableCell>
                   <DeputyIdentity deputy={deputy} />
@@ -110,9 +116,12 @@ export function RankingTable({
         </Table>
       </div>
 
-      <div className="grid gap-4 lg:hidden">
+      <div className="grid min-w-0 gap-4 lg:hidden">
         {deputies.map((deputy) => (
-          <article key={deputy.id} className="rounded-lg border bg-card p-4 shadow-xs">
+          <article
+            key={deputy.id}
+            className="min-w-0 overflow-hidden rounded-lg border bg-card p-4 shadow-xs"
+          >
             <div className="flex items-start gap-3">
               <p className="w-8 shrink-0 pt-1 text-center text-xl font-semibold tabular-nums">
                 {deputy.rank ?? "—"}
@@ -121,6 +130,9 @@ export function RankingTable({
                 <DeputyIdentity deputy={deputy} />
               </div>
               <SemanticScore value={deputy.score} compact />
+            </div>
+            <div className="mt-3 pl-11">
+              <RankTrend change={rankChanges.get(deputy.id)} />
             </div>
             <div className="mt-5 grid grid-cols-2 gap-4">
               <DimensionScore
@@ -147,6 +159,43 @@ export function RankingTable({
         ))}
       </div>
     </>
+  );
+}
+
+function RankTrend({
+  change,
+  compact = false,
+}: {
+  change?: RankChange;
+  compact?: boolean;
+}) {
+  if (!change?.previousPeriod || change.delta === null) {
+    return (
+      <span className="mt-1 inline-flex text-[10px] text-muted-foreground">
+        Sem comparação
+      </span>
+    );
+  }
+  if (change.delta === 0) {
+    return (
+      <span className="mt-1 inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+        <Minus className="size-3" /> Manteve desde {change.previousPeriod}
+      </span>
+    );
+  }
+  const improved = change.delta > 0;
+  const Icon = improved ? ArrowUp : ArrowDown;
+  return (
+    <span
+      className={cn(
+        "mt-1 inline-flex items-center gap-1 text-[10px] font-medium",
+        improved ? "text-emerald-600" : "text-red-600",
+        compact && "justify-center",
+      )}
+    >
+      <Icon className="size-3" />
+      {Math.abs(change.delta)} desde {change.previousPeriod}
+    </span>
   );
 }
 

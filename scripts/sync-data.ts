@@ -3,21 +3,26 @@ import { Readable } from "node:stream";
 import { parse } from "csv-parse";
 import AdmZip from "adm-zip";
 import type {
-  DeputyRecord,
+  DeputyIdentity,
+  PeriodDeputyRecord,
+  RankingPeriod,
   RankingSnapshot,
   RawMetrics,
 } from "../src/lib/ranking";
 
+const LEGISLATURE = 57;
 const PERIOD_START = "2023-02-01";
 const PERIOD_END = new Date().toISOString().slice(0, 10);
+const CURRENT_YEAR = Number(PERIOD_END.slice(0, 4));
 const YEARS = Array.from(
-  { length: Number(PERIOD_END.slice(0, 4)) - 2022 },
+  { length: CURRENT_YEAR - 2022 },
   (_, index) => 2023 + index,
 );
 const OUTPUT = new URL("../src/data/ranking-snapshot.json", import.meta.url);
 const CHAMBER_API = "https://dadosabertos.camara.leg.br/api/v2";
 const CHAMBER_FILES = "https://dadosabertos.camara.leg.br/arquivos";
 const TSE_FILES = "https://cdn.tse.jus.br/estatistica/sead/odsele";
+const USER_AGENT = "x9brasil/2.0";
 
 type ChamberDeputy = {
   id: number;
@@ -28,11 +33,26 @@ type ChamberDeputy = {
   uri: string;
 };
 
-type DeputyAccumulator = {
-  deputy: ChamberDeputy;
-  civilName: string;
-  statusDate: string;
-  earliestActivity: string | null;
+type DeputyStatus = {
+  dataHora: string;
+  situacao: string | null;
+  siglaPartido: string;
+  siglaUf: string;
+};
+
+type ExerciseInterval = {
+  start: string;
+  end: string;
+  party: string;
+  state: string;
+};
+
+type PeriodAccumulator = {
+  daysInOffice: number;
+  officeStart: string;
+  officeEnd: string;
+  partyDays: Map<string, number>;
+  stateDays: Map<string, number>;
   plenaryAttendances: Set<string>;
   nominalVotes: Set<string>;
   substantiveProposals: Set<string>;
@@ -42,6 +62,13 @@ type DeputyAccumulator = {
   expensesTotal: number;
   expenseDocuments: number;
   supplierTotals: Map<string, number>;
+};
+
+type DeputyAccumulator = {
+  deputy: ChamberDeputy;
+  civilName: string;
+  intervals: ExerciseInterval[];
+  periods: Map<string, PeriodAccumulator>;
   tseSequence: string | null;
   electionNumber: string | null;
   electionStatus: string | null;
@@ -85,23 +112,66 @@ function dateOnly(value: string | undefined) {
   return value?.slice(0, 10) || null;
 }
 
-function registerActivity(accumulator: DeputyAccumulator, date: string | null) {
-  if (!date || date < PERIOD_START || date > PERIOD_END) return;
-  if (!accumulator.earliestActivity || date < accumulator.earliestActivity) {
-    accumulator.earliestActivity = date;
-  }
+function timestamp(value: string) {
+  return new Date(`${value}T00:00:00Z`).getTime();
 }
 
-function monthsBetween(start: string, end: string) {
-  const from = new Date(`${start}T00:00:00Z`);
-  const to = new Date(`${end}T00:00:00Z`);
-  const days = Math.max(1, (to.getTime() - from.getTime()) / 86_400_000);
-  return Math.max(1, days / 30.4375);
+function daysInclusive(start: string, end: string) {
+  return Math.max(1, Math.floor((timestamp(end) - timestamp(start)) / 86_400_000) + 1);
+}
+
+function dayBefore(value: string) {
+  return new Date(timestamp(value) - 86_400_000).toISOString().slice(0, 10);
+}
+
+function periodDefinitions() {
+  return [
+    ...YEARS.map((year) => ({
+      id: String(year),
+      label: String(year),
+      start: year === 2023 ? PERIOD_START : `${year}-01-01`,
+      end: year === CURRENT_YEAR ? PERIOD_END : `${year}-12-31`,
+      partial: year === CURRENT_YEAR && PERIOD_END !== `${year}-12-31`,
+    })),
+    {
+      id: "legislature",
+      label: "Legislatura completa",
+      start: PERIOD_START,
+      end: PERIOD_END,
+      partial: true,
+    },
+  ];
+}
+
+const PERIODS = periodDefinitions();
+
+function emptyPeriod(): PeriodAccumulator {
+  return {
+    daysInOffice: 0,
+    officeStart: PERIOD_END,
+    officeEnd: PERIOD_START,
+    partyDays: new Map(),
+    stateDays: new Map(),
+    plenaryAttendances: new Set(),
+    nominalVotes: new Set(),
+    substantiveProposals: new Set(),
+    oversightProposals: new Set(),
+    advancedProposals: new Set(),
+    convertedProposals: new Set(),
+    expensesTotal: 0,
+    expenseDocuments: 0,
+    supplierTotals: new Map(),
+  };
+}
+
+function periodIdsForDate(date: string | null) {
+  if (!date || date < PERIOD_START || date > PERIOD_END) return [];
+  return [date.slice(0, 4), "legislature"];
 }
 
 async function fetchJson<T>(url: string, attempt = 0): Promise<T> {
   const response = await fetch(url, {
-    headers: { accept: "application/json", "user-agent": "raio-x-eleitoral/1.0" },
+    headers: { accept: "application/json", "user-agent": USER_AGENT },
   });
   if ((response.status === 429 || response.status >= 500) && attempt < 6) {
     const retryAfter = Number(response.headers.get("retry-after") || 0) * 1000;
@@ -114,21 +184,14 @@ async function fetchJson<T>(url: string, attempt = 0): Promise<T> {
 }
 
 async function fetchBuffer(url: string) {
-  const response = await fetch(url, {
-    headers: { "user-agent": "raio-x-eleitoral/1.0" },
-  });
+  const response = await fetch(url, { headers: { "user-agent": USER_AGENT } });
   if (!response.ok) throw new Error(`${response.status} ao baixar ${url}`);
   return Buffer.from(await response.arrayBuffer());
 }
 
-async function forEachRemoteCsv(
-  url: string,
-  onRow: (row: CsvRow) => void,
-) {
+async function forEachRemoteCsv(url: string, onRow: (row: CsvRow) => void) {
   console.log(`Lendo ${url}`);
-  const response = await fetch(url, {
-    headers: { "user-agent": "raio-x-eleitoral/1.0" },
-  });
+  const response = await fetch(url, { headers: { "user-agent": USER_AGENT } });
   if (!response.ok || !response.body) {
     throw new Error(`${response.status} ao baixar ${url}`);
   }
@@ -181,85 +244,164 @@ async function mapLimit<T, R>(
   return result;
 }
 
-async function loadCurrentDeputies() {
+function buildIntervals(statuses: DeputyStatus[]) {
+  const sorted = [...statuses].sort((a, b) =>
+    a.dataHora.localeCompare(b.dataHora),
+  );
+  const intervals: ExerciseInterval[] = [];
+  let active: { start: string; party: string; state: string } | null = null;
+
+  for (const status of sorted) {
+    const date = dateOnly(status.dataHora);
+    if (!date) continue;
+    if (status.situacao === "Exercício") {
+      if (
+        active &&
+        active.party === status.siglaPartido &&
+        active.state === status.siglaUf
+      ) {
+        continue;
+      }
+      if (active) {
+        intervals.push({
+          ...active,
+          end: dayBefore(date),
+        });
+      }
+      active = {
+        start: date < PERIOD_START ? PERIOD_START : date,
+        party: status.siglaPartido,
+        state: status.siglaUf,
+      };
+    } else if (active) {
+      intervals.push({
+        ...active,
+        end: date > PERIOD_END ? PERIOD_END : dayBefore(date),
+      });
+      active = null;
+    }
+  }
+  if (active) intervals.push({ ...active, end: PERIOD_END });
+  return intervals.filter(
+    (interval) =>
+      interval.start <= interval.end &&
+      interval.end >= PERIOD_START &&
+      interval.start <= PERIOD_END,
+  );
+}
+
+function addExercisePeriods(accumulator: DeputyAccumulator) {
+  for (const period of PERIODS) {
+    const target = emptyPeriod();
+    for (const interval of accumulator.intervals) {
+      const start = interval.start > period.start ? interval.start : period.start;
+      const end = interval.end < period.end ? interval.end : period.end;
+      if (start > end) continue;
+      const days = daysInclusive(start, end);
+      target.daysInOffice += days;
+      target.officeStart = start < target.officeStart ? start : target.officeStart;
+      target.officeEnd = end > target.officeEnd ? end : target.officeEnd;
+      target.partyDays.set(
+        interval.party,
+        (target.partyDays.get(interval.party) || 0) + days,
+      );
+      target.stateDays.set(
+        interval.state,
+        (target.stateDays.get(interval.state) || 0) + days,
+      );
+    }
+    if (target.daysInOffice > 0) accumulator.periods.set(period.id, target);
+  }
+}
+
+async function loadLegislatureDeputies() {
   const deputies: ChamberDeputy[] = [];
-  for (let page = 1; page <= 6; page += 1) {
+  for (let page = 1; ; page += 1) {
     const response = await fetchJson<{
       dados: ChamberDeputy[];
       links: Array<{ rel: string }>;
     }>(
-      `${CHAMBER_API}/deputados?itens=100&pagina=${page}&ordem=ASC&ordenarPor=nome`,
+      `${CHAMBER_API}/deputados?idLegislatura=${LEGISLATURE}&itens=100&pagina=${page}&ordem=ASC&ordenarPor=nome`,
     );
     deputies.push(...response.dados);
     if (!response.links.some((link) => link.rel === "next")) break;
   }
 
-  console.log(`Carregando detalhes de ${deputies.length} deputados`);
-  const details = await mapLimit(deputies, 4, async (deputy) => {
-    const response = await fetchJson<{
-      dados: {
-        nomeCivil: string;
-        ultimoStatus: { data: string | null };
-      };
-    }>(`${CHAMBER_API}/deputados/${deputy.id}`);
+  const unique = Array.from(
+    new Map(deputies.map((deputy) => [deputy.id, deputy])).values(),
+  );
+  console.log(`Carregando histórico de ${unique.length} parlamentares`);
+  const details = await mapLimit(unique, 8, async (deputy) => {
+    const [detail, history] = await Promise.all([
+      fetchJson<{ dados: { nomeCivil: string } }>(
+        `${CHAMBER_API}/deputados/${deputy.id}`,
+      ),
+      fetchJson<{ dados: DeputyStatus[] }>(
+        `${CHAMBER_API}/deputados/${deputy.id}/historico`,
+      ),
+    ]);
     return {
       deputy,
-      civilName: response.dados.nomeCivil,
-      statusDate: response.dados.ultimoStatus.data || PERIOD_START,
+      civilName: detail.dados.nomeCivil,
+      intervals: buildIntervals(history.dados),
     };
   });
 
   return new Map(
-    details.map(({ deputy, civilName, statusDate }) => [
-      deputy.id,
-      {
+    details.map(({ deputy, civilName, intervals }) => {
+      const accumulator: DeputyAccumulator = {
         deputy,
         civilName,
-        statusDate,
-        earliestActivity: null,
-        plenaryAttendances: new Set<string>(),
-        nominalVotes: new Set<string>(),
-        substantiveProposals: new Set<string>(),
-        oversightProposals: new Set<string>(),
-        advancedProposals: new Set<string>(),
-        convertedProposals: new Set<string>(),
-        expensesTotal: 0,
-        expenseDocuments: 0,
-        supplierTotals: new Map<string, number>(),
+        intervals,
+        periods: new Map(),
         tseSequence: null,
         electionNumber: null,
         electionStatus: null,
         assetsTotal: null,
         assetsCount: null,
-      } satisfies DeputyAccumulator,
-    ]),
+      };
+      addExercisePeriods(accumulator);
+      return [deputy.id, accumulator];
+    }),
   );
 }
 
-async function loadParticipation(accumulators: Map<number, DeputyAccumulator>) {
-  const eligibleEvents = new Set<string>();
-  for (const year of YEARS) {
-    await forEachRemoteCsv(`${CHAMBER_FILES}/eventos/csv/eventos-${year}.csv`, (row) => {
-      if (
-        row.situacao === "Encerrada" &&
-        row.descricaoTipo === "Sessão Deliberativa" &&
-        dateOnly(row.dataHoraInicio) &&
-        dateOnly(row.dataHoraInicio)! <= PERIOD_END
-      ) {
-        eligibleEvents.add(row.id);
-      }
-    });
+function forDatePeriods(
+  accumulator: DeputyAccumulator,
+  date: string | null,
+  callback: (period: PeriodAccumulator) => void,
+) {
+  for (const periodId of periodIdsForDate(date)) {
+    const period = accumulator.periods.get(periodId);
+    if (period) callback(period);
   }
+}
 
+async function loadParticipation(accumulators: Map<number, DeputyAccumulator>) {
   for (const year of YEARS) {
+    const eligibleEvents = new Set<string>();
+    await forEachRemoteCsv(
+      `${CHAMBER_FILES}/eventos/csv/eventos-${year}.csv`,
+      (row) => {
+        if (
+          row.situacao === "Encerrada" &&
+          row.descricaoTipo === "Sessão Deliberativa" &&
+          dateOnly(row.dataHoraInicio) &&
+          dateOnly(row.dataHoraInicio)! <= PERIOD_END
+        ) {
+          eligibleEvents.add(row.id);
+        }
+      },
+    );
     await forEachRemoteCsv(
       `${CHAMBER_FILES}/eventosPresencaDeputados/csv/eventosPresencaDeputados-${year}.csv`,
       (row) => {
         if (!eligibleEvents.has(row.idEvento)) return;
         const accumulator = accumulators.get(Number(row.idDeputado));
         if (!accumulator) return;
-        accumulator.plenaryAttendances.add(row.idEvento);
-        registerActivity(accumulator, dateOnly(row.dataHoraInicio));
+        forDatePeriods(accumulator, dateOnly(row.dataHoraInicio), (period) => {
+          period.plenaryAttendances.add(row.idEvento);
+        });
       },
     );
     await forEachRemoteCsv(
@@ -267,34 +409,47 @@ async function loadParticipation(accumulators: Map<number, DeputyAccumulator>) {
       (row) => {
         const accumulator = accumulators.get(Number(row.deputado_id));
         if (!accumulator) return;
-        accumulator.nominalVotes.add(row.idVotacao);
-        registerActivity(accumulator, dateOnly(row.dataHoraVoto));
+        forDatePeriods(accumulator, dateOnly(row.dataHoraVoto), (period) => {
+          period.nominalVotes.add(row.idVotacao);
+        });
       },
     );
   }
 }
 
 async function loadProduction(accumulators: Map<number, DeputyAccumulator>) {
-  const proposals = new Map<
-    string,
-    { type: string; date: string | null; advanced: boolean; converted: boolean }
-  >();
+  const proposals = new Map<string, { type: string; date: string | null }>();
   for (const year of YEARS) {
     await forEachRemoteCsv(
       `${CHAMBER_FILES}/proposicoes/csv/proposicoes-${year}.csv`,
       (row) => {
-        if (!substantiveTypes.has(row.siglaTipo) && !oversightTypes.has(row.siglaTipo)) {
-          return;
+        if (substantiveTypes.has(row.siglaTipo) || oversightTypes.has(row.siglaTipo)) {
+          proposals.set(row.id, {
+            type: row.siglaTipo,
+            date: dateOnly(row.dataApresentacao),
+          });
         }
-        proposals.set(row.id, {
-          type: row.siglaTipo,
-          date: dateOnly(row.dataApresentacao),
-          advanced: numberFrom(row.ultimoStatus_sequencia) > 1,
-          converted:
-            Boolean(row.urnFinal) ||
-            row.ultimoStatus_descricaoSituacao
-              ?.toLocaleLowerCase("pt-BR")
-              .includes("transformado em norma"),
+      },
+    );
+  }
+
+  const authors = new Map<string, number>();
+  for (const year of YEARS) {
+    await forEachRemoteCsv(
+      `${CHAMBER_FILES}/proposicoesAutores/csv/proposicoesAutores-${year}.csv`,
+      (row) => {
+        if (row.proponente !== "1" || !proposals.has(row.idProposicao)) return;
+        const deputyId = Number(row.idDeputadoAutor);
+        const accumulator = accumulators.get(deputyId);
+        const proposal = proposals.get(row.idProposicao);
+        if (!accumulator || !proposal) return;
+        authors.set(row.idProposicao, deputyId);
+        forDatePeriods(accumulator, proposal.date, (period) => {
+          if (substantiveTypes.has(proposal.type)) {
+            period.substantiveProposals.add(row.idProposicao);
+          } else {
+            period.oversightProposals.add(row.idProposicao);
+          }
         });
       },
     );
@@ -302,20 +457,22 @@ async function loadProduction(accumulators: Map<number, DeputyAccumulator>) {
 
   for (const year of YEARS) {
     await forEachRemoteCsv(
-      `${CHAMBER_FILES}/proposicoesAutores/csv/proposicoesAutores-${year}.csv`,
+      `${CHAMBER_FILES}/proposicoesTramitacoes/csv/proposicoesTramitacoes-${year}.csv`,
       (row) => {
-        if (row.proponente !== "1") return;
-        const accumulator = accumulators.get(Number(row.idDeputadoAutor));
-        const proposal = proposals.get(row.idProposicao);
-        if (!accumulator || !proposal) return;
-        if (substantiveTypes.has(proposal.type)) {
-          accumulator.substantiveProposals.add(row.idProposicao);
-        } else {
-          accumulator.oversightProposals.add(row.idProposicao);
-        }
-        if (proposal.advanced) accumulator.advancedProposals.add(row.idProposicao);
-        if (proposal.converted) accumulator.convertedProposals.add(row.idProposicao);
-        registerActivity(accumulator, proposal.date);
+        const proposalId = row.uriProposicao?.split("/").pop() || "";
+        const deputyId = authors.get(proposalId);
+        const accumulator = deputyId ? accumulators.get(deputyId) : null;
+        if (!accumulator) return;
+        const text = `${row.descricaoTramitacao || ""} ${row.despacho || ""}`
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLocaleLowerCase("pt-BR");
+        forDatePeriods(accumulator, dateOnly(row.dataHora), (period) => {
+          period.advancedProposals.add(proposalId);
+          if (/transformad|convertid/.test(text) && /norma|lei/.test(text)) {
+            period.convertedProposals.add(proposalId);
+          }
+        });
       },
     );
   }
@@ -326,23 +483,22 @@ async function loadExpenses(accumulators: Map<number, DeputyAccumulator>) {
     const url = `https://www.camara.leg.br/cotas/Ano-${year}.csv.zip`;
     console.log(`Lendo ${url}`);
     const zip = new AdmZip(await fetchBuffer(url));
-    const entry = zip
-      .getEntries()
-      .find((candidate) => candidate.entryName.endsWith(".csv"));
+    const entry = zip.getEntries().find((candidate) => candidate.entryName.endsWith(".csv"));
     if (!entry) throw new Error(`CSV não encontrado em ${url}`);
     await forEachBufferCsv(entry.getData(), "utf8", (row) => {
       const accumulator = accumulators.get(Number(row.ideCadastro));
-      if (!accumulator) return;
+      const date = dateOnly(row.datEmissao);
       const amount = numberFrom(row.vlrLiquido);
-      if (amount <= 0) return;
-      accumulator.expensesTotal += amount;
-      accumulator.expenseDocuments += 1;
+      if (!accumulator || !date || amount <= 0) return;
       const supplier = normalize(row.txtCNPJCPF || row.txtFornecedor || "NAO INFORMADO");
-      accumulator.supplierTotals.set(
-        supplier,
-        (accumulator.supplierTotals.get(supplier) || 0) + amount,
-      );
-      registerActivity(accumulator, dateOnly(row.datEmissao));
+      forDatePeriods(accumulator, date, (period) => {
+        period.expensesTotal += amount;
+        period.expenseDocuments += 1;
+        period.supplierTotals.set(
+          supplier,
+          (period.supplierTotals.get(supplier) || 0) + amount,
+        );
+      });
     });
   }
 }
@@ -350,7 +506,9 @@ async function loadExpenses(accumulators: Map<number, DeputyAccumulator>) {
 async function loadTse(accumulators: Map<number, DeputyAccumulator>) {
   const byCivilNameAndState = new Map<string, DeputyAccumulator[]>();
   for (const accumulator of accumulators.values()) {
-    const key = `${normalize(accumulator.civilName)}:${accumulator.deputy.siglaUf}`;
+    const state =
+      accumulator.intervals[0]?.state || accumulator.deputy.siglaUf;
+    const key = `${normalize(accumulator.civilName)}:${state}`;
     byCivilNameAndState.set(key, [
       ...(byCivilNameAndState.get(key) || []),
       accumulator,
@@ -364,8 +522,9 @@ async function loadTse(accumulators: Map<number, DeputyAccumulator>) {
   if (!candidateEntry) throw new Error("Arquivo nacional de candidatos não encontrado");
   await forEachBufferCsv(candidateEntry.getData(), "latin1", (row) => {
     if (row.DS_CARGO !== "DEPUTADO FEDERAL") return;
-    const key = `${normalize(row.NM_CANDIDATO)}:${row.SG_UF}`;
-    const matches = byCivilNameAndState.get(key);
+    const matches = byCivilNameAndState.get(
+      `${normalize(row.NM_CANDIDATO)}:${row.SG_UF}`,
+    );
     if (!matches || matches.length !== 1) return;
     const accumulator = matches[0];
     accumulator.tseSequence = row.SQ_CANDIDATO;
@@ -375,9 +534,7 @@ async function loadTse(accumulators: Map<number, DeputyAccumulator>) {
 
   const bySequence = new Map<string, DeputyAccumulator>();
   for (const accumulator of accumulators.values()) {
-    if (accumulator.tseSequence) {
-      bySequence.set(accumulator.tseSequence, accumulator);
-    }
+    if (accumulator.tseSequence) bySequence.set(accumulator.tseSequence, accumulator);
   }
   const assetsZip = new AdmZip(
     await fetchBuffer(`${TSE_FILES}/bem_candidato/bem_candidato_2022.zip`),
@@ -393,67 +550,83 @@ async function loadTse(accumulators: Map<number, DeputyAccumulator>) {
   });
 }
 
+function dominantValue(values: Map<string, number>, fallback: string) {
+  return (
+    [...values.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || fallback
+  );
+}
+
+function buildPeriodDeputy(
+  item: DeputyAccumulator,
+  period: PeriodAccumulator,
+): PeriodDeputyRecord {
+  const expensesTotal =
+    period.expenseDocuments > 0 ? period.expensesTotal : null;
+  const supplierConcentration =
+    expensesTotal && expensesTotal > 0
+      ? [...period.supplierTotals.values()].reduce(
+          (sum, amount) => sum + (amount / expensesTotal) ** 2,
+          0,
+        )
+      : null;
+  const metrics: RawMetrics = {
+    monthsInOffice: Number((period.daysInOffice / 30.4375).toFixed(2)),
+    plenaryAttendances: period.plenaryAttendances.size,
+    nominalVotes: period.nominalVotes.size,
+    substantiveProposals: period.substantiveProposals.size,
+    oversightProposals: period.oversightProposals.size,
+    advancedProposals: period.advancedProposals.size,
+    convertedProposals: period.convertedProposals.size,
+    expensesTotal,
+    expenseDocuments: period.expenseDocuments || null,
+    supplierConcentration,
+    campaignCandidacyAvailable: Boolean(item.tseSequence),
+    assetsAvailable: item.assetsCount !== null,
+    campaignReceiptsAvailable: false,
+    campaignExpensesAvailable: false,
+    accountsStatusAvailable: false,
+  };
+  return {
+    id: item.deputy.id,
+    party: dominantValue(period.partyDays, item.deputy.siglaPartido),
+    state: dominantValue(period.stateDays, item.deputy.siglaUf),
+    officeStart: period.officeStart,
+    officeEnd: period.officeEnd,
+    daysInOffice: period.daysInOffice,
+    metrics,
+  };
+}
+
 function buildSnapshot(accumulators: Map<number, DeputyAccumulator>): RankingSnapshot {
-  const deputies = Array.from(accumulators.values()).map<DeputyRecord>((item) => {
-    const startCandidates = [
-      item.statusDate.slice(0, 10),
-      item.earliestActivity,
-    ].filter((value): value is string => value !== null && value >= PERIOD_START);
-    const officeStart = startCandidates.sort()[0] || PERIOD_START;
-    const expensesTotal = item.expenseDocuments > 0 ? item.expensesTotal : null;
-    let supplierConcentration: number | null = null;
-    if (expensesTotal && expensesTotal > 0) {
-      supplierConcentration = Array.from(item.supplierTotals.values()).reduce(
-        (sum, amount) => sum + (amount / expensesTotal) ** 2,
-        0,
-      );
-    }
+  const deputies = [...accumulators.values()].map<DeputyIdentity>((item) => ({
+    id: item.deputy.id,
+    slug: slugify(item.deputy.nome, item.deputy.id),
+    name: item.deputy.nome,
+    civilName: item.civilName,
+    photoUrl: item.deputy.urlFoto,
+    chamberUrl: item.deputy.uri,
+    electionNumber: item.electionNumber,
+    tseSequence: item.tseSequence,
+    electionStatus: item.electionStatus,
+    assetsTotal: item.assetsTotal,
+    assetsCount: item.assetsCount,
+  }));
 
-    const metrics: RawMetrics = {
-      monthsInOffice: Number(monthsBetween(officeStart, PERIOD_END).toFixed(2)),
-      plenaryAttendances: item.plenaryAttendances.size,
-      nominalVotes: item.nominalVotes.size,
-      substantiveProposals: item.substantiveProposals.size,
-      oversightProposals: item.oversightProposals.size,
-      advancedProposals: item.advancedProposals.size,
-      convertedProposals: item.convertedProposals.size,
-      expensesTotal,
-      expenseDocuments: item.expenseDocuments || null,
-      supplierConcentration,
-      campaignCandidacyAvailable: Boolean(item.tseSequence),
-      assetsAvailable: item.assetsCount !== null,
-      campaignReceiptsAvailable: false,
-      campaignExpensesAvailable: false,
-      accountsStatusAvailable: false,
-    };
-
-    return {
-      id: item.deputy.id,
-      slug: slugify(item.deputy.nome, item.deputy.id),
-      name: item.deputy.nome,
-      civilName: item.civilName,
-      party: item.deputy.siglaPartido,
-      state: item.deputy.siglaUf,
-      photoUrl: item.deputy.urlFoto,
-      chamberUrl: item.deputy.uri,
-      electionNumber: item.electionNumber,
-      tseSequence: item.tseSequence,
-      electionStatus: item.electionStatus,
-      assetsTotal: item.assetsTotal,
-      assetsCount: item.assetsCount,
-      officeStart,
-      metrics,
-    };
-  });
+  const periods = PERIODS.map<RankingPeriod>((definition) => ({
+    ...definition,
+    deputies: [...accumulators.values()]
+      .flatMap((item) => {
+        const period = item.periods.get(definition.id);
+        return period ? [buildPeriodDeputy(item, period)] : [];
+      })
+      .sort((a, b) => a.id - b.id),
+  }));
 
   return {
-    version: 1,
+    version: 2,
     generatedAt: new Date().toISOString(),
-    period: {
-      start: PERIOD_START,
-      end: PERIOD_END,
-      timezone: "America/Fortaleza",
-    },
+    timezone: "America/Fortaleza",
+    defaultPeriod: String(CURRENT_YEAR),
     sources: [
       {
         name: "Dados Abertos da Câmara dos Deputados",
@@ -467,12 +640,13 @@ function buildSnapshot(accumulators: Map<number, DeputyAccumulator>): RankingSna
       },
     ],
     deputies: deputies.sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+    periods,
   };
 }
 
 async function main() {
-  console.log(`Sincronizando legislatura atual de ${PERIOD_START} a ${PERIOD_END}`);
-  const accumulators = await loadCurrentDeputies();
+  console.log(`Sincronizando a ${LEGISLATURE}ª legislatura até ${PERIOD_END}`);
+  const accumulators = await loadLegislatureDeputies();
   await loadParticipation(accumulators);
   await loadProduction(accumulators);
   await loadExpenses(accumulators);
@@ -480,7 +654,9 @@ async function main() {
   const snapshot = buildSnapshot(accumulators);
   await mkdir(new URL("../src/data", import.meta.url), { recursive: true });
   await writeFile(OUTPUT, `${JSON.stringify(snapshot, null, 2)}\n`);
-  console.log(`Snapshot salvo com ${snapshot.deputies.length} deputados`);
+  console.log(
+    `Snapshot v2 salvo com ${snapshot.deputies.length} parlamentares e ${snapshot.periods.length} períodos`,
+  );
 }
 
 main().catch((error) => {

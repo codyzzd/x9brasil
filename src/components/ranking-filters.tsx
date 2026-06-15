@@ -13,21 +13,27 @@ import {
 export type RankingOrder = "score" | "participation" | "production" | "resources";
 
 export function RankingFilters({
+  period,
   state,
   party,
   order,
+  periods,
   states,
   parties,
+  onPeriodChange,
   onStateChange,
   onPartyChange,
   onOrderChange,
   onReset,
 }: {
+  period: string;
   state: string;
   party: string;
   order: RankingOrder;
+  periods: Array<{ id: string; label: string; partial: boolean; end: string }>;
   states: string[];
   parties: string[];
+  onPeriodChange: (value: string) => void;
   onStateChange: (value: string) => void;
   onPartyChange: (value: string) => void;
   onOrderChange: (value: RankingOrder) => void;
@@ -41,10 +47,29 @@ export function RankingFilters({
           <RotateCcw className="size-3.5" /> Limpar
         </Button>
       </div>
+      <FilterField label="Período">
+        <Select
+          value={period}
+          onValueChange={(value) => onPeriodChange(value ?? periods[0]?.id ?? "")}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue>
+              {periods.find((item) => item.id === period)?.label || period}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {periods.map((item) => (
+              <SelectItem key={item.id} value={item.id}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FilterField>
       <FilterField label="Estado">
         <Select value={state} onValueChange={(value) => onStateChange(value ?? "all")}>
           <SelectTrigger className="w-full">
-            <SelectValue />
+            <SelectValue>{state === "all" ? "Todo o Brasil" : state}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todo o Brasil</SelectItem>
@@ -59,7 +84,9 @@ export function RankingFilters({
       <FilterField label="Partido">
         <Select value={party} onValueChange={(value) => onPartyChange(value ?? "all")}>
           <SelectTrigger className="w-full">
-            <SelectValue />
+            <SelectValue>
+              {party === "all" ? "Todos os partidos" : party}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos os partidos</SelectItem>
@@ -77,7 +104,14 @@ export function RankingFilters({
           onValueChange={(value) => onOrderChange((value ?? "score") as RankingOrder)}
         >
           <SelectTrigger className="w-full">
-            <SelectValue />
+            <SelectValue>
+              {{
+                score: "Score geral",
+                participation: "Participação",
+                production: "Produção",
+                resources: "Uso de recursos",
+              }[order]}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="score">Score geral</SelectItem>

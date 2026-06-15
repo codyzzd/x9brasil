@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Raio-X Eleitoral",
-    template: "%s | Raio-X Eleitoral",
+    default: "x9brasil",
+    template: "%s | x9brasil",
   },
   description:
     "Consulta de candidaturas e dados públicos oficiais do TSE e das casas legislativas.",
