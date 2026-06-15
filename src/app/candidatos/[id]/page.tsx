@@ -13,6 +13,10 @@ import {
   Landmark,
   MapPin,
 } from "lucide-react";
+import {
+  AnnualEvolutionChart,
+  type AnnualEvolutionPoint,
+} from "@/components/annual-evolution-chart";
 import { DimensionScore } from "@/components/dimension-score";
 import { SemanticScore } from "@/components/semantic-score";
 import { SiteFooter } from "@/components/site-footer";
@@ -35,14 +39,15 @@ import {
   calculatePublicValueRanking,
   calculateRanking,
   calculateRankChanges,
+  comparisonPeriod,
   filterRankingCohort,
   formatCurrency,
   getRankingPeriod,
   materializePeriod,
-  previousAnnualPeriod,
   type PublicValueRankedDeputy,
   type RankChange,
   type RankedDeputy,
+  type RankingComparison,
   type RankingIndex,
 } from "@/lib/ranking";
 import { publicValueClassificationMetadata } from "@/lib/public-value";
@@ -55,6 +60,7 @@ type PageProps = {
     partido?: string;
     periodo?: string;
     indice?: string;
+    comparacao?: string;
   }>;
 };
 
@@ -79,6 +85,8 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
   const context = await searchParams;
   const index: RankingIndex =
     context.indice === "valor-publico" ? "public-value" : "current";
+  const comparison: RankingComparison =
+    context.comparacao === "ano-a-ano" ? "previous-year" : "legislature-start";
   const period = getRankingPeriod(
     rankingSnapshot,
     context.periodo || rankingSnapshot.defaultPeriod,
@@ -100,7 +108,11 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
   const identityDetails = profile.identity;
   const periodDetails = profile.period;
 
-  const previousPeriod = previousAnnualPeriod(rankingSnapshot, period.id);
+  const previousPeriod = comparisonPeriod(
+    rankingSnapshot,
+    period.id,
+    comparison,
+  );
   const previousRanked = previousPeriod
     ? index === "public-value"
       ? calculatePublicValueRanking(
@@ -138,11 +150,34 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
       return { period: item, ranked: itemRanking || null };
     });
   const partialAnnualPeriod = annualHistory.find((item) => item.period.partial)?.period;
+  const annualChartData: AnnualEvolutionPoint[] = annualHistory.map(
+    ({ period: item, ranked: history }) => ({
+      year: item.label,
+      partial: item.partial,
+      rank: history?.rank ?? null,
+      score: history?.score ?? null,
+      participation: history?.dimensions.participation ?? null,
+      production: history
+        ? index === "public-value"
+          ? profileDimension(history, "contribution")
+          : profileDimension(history, "production")
+        : null,
+      resources: history
+        ? index === "public-value"
+          ? profileDimension(history, "efficiency")
+          : profileDimension(history, "resources")
+        : null,
+      transparency: history?.dimensions.transparency ?? null,
+    }),
+  );
   const classificationMetadata = publicValueClassificationMetadata();
 
   const back = new URLSearchParams();
   back.set("indice", index === "public-value" ? "valor-publico" : "atual");
   back.set("periodo", period.id);
+  if (comparison === "previous-year") {
+    back.set("comparacao", "ano-a-ano");
+  }
   if (context.uf) back.set("uf", context.uf);
   if (context.partido) back.set("partido", context.partido);
 
@@ -244,50 +279,15 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="w-full max-w-full overflow-x-auto">
-                <div className="grid min-w-[720px] grid-cols-[80px_90px_90px_repeat(4,1fr)] gap-3 border-b pb-2 text-xs font-medium text-muted-foreground">
-                  <span>Ano</span>
-                  <span>Posição</span>
-                  <span>Score</span>
-                  <span>Participação</span>
-                  <span>
-                    {index === "public-value" ? "Contribuição" : "Produção"}
-                  </span>
-                  <span>
-                    {index === "public-value" ? "Eficiência" : "Recursos"}
-                  </span>
-                  <span>Transparência</span>
-                </div>
-                {annualHistory.map(({ period: item, ranked: history }) => (
-                  <div
-                    key={item.id}
-                    className="grid min-w-[720px] grid-cols-[80px_90px_90px_repeat(4,1fr)] gap-3 border-b py-3 text-sm tabular-nums last:border-0"
-                  >
-                    <span className="font-medium">
-                      {item.label}
-                      {item.partial ? "*" : ""}
-                    </span>
-                    <span>{history?.rank ? `${history.rank}º` : "—"}</span>
-                    <span>{history?.score ?? "—"}</span>
-                    <span>{history?.dimensions.participation ?? "—"}</span>
-                    <span>
-                      {history
-                        ? index === "public-value"
-                          ? profileDimension(history, "contribution")
-                          : profileDimension(history, "production")
-                        : "—"}
-                    </span>
-                    <span>
-                      {history
-                        ? index === "public-value"
-                          ? profileDimension(history, "efficiency")
-                          : profileDimension(history, "resources")
-                        : "—"}
-                    </span>
-                    <span>{history?.dimensions.transparency ?? "—"}</span>
-                  </div>
-                ))}
-              </div>
+              <AnnualEvolutionChart
+                data={annualChartData}
+                productionLabel={
+                  index === "public-value" ? "Contribuição" : "Produção"
+                }
+                resourcesLabel={
+                  index === "public-value" ? "Eficiência" : "Recursos"
+                }
+              />
               {partialAnnualPeriod && (
                 <p className="mt-3 text-xs text-muted-foreground">
                   * Ano em andamento, com dados até{" "}

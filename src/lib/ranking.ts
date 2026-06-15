@@ -189,6 +189,7 @@ export type PublicValueRankedDeputy = DeputyRecord & {
 };
 
 export type RankingIndex = "current" | "public-value";
+export type RankingComparison = "legislature-start" | "previous-year";
 
 export type RankChange = {
   currentRank: number | null;
@@ -225,6 +226,28 @@ export function previousAnnualPeriod(
   const year = Number(periodId);
   if (!Number.isInteger(year)) return null;
   return snapshot.periods.find((period) => period.id === String(year - 1)) || null;
+}
+
+export function comparisonPeriod(
+  snapshot: RankingSnapshot,
+  periodId: string,
+  comparison: RankingComparison,
+) {
+  if (comparison === "previous-year") {
+    return previousAnnualPeriod(snapshot, periodId);
+  }
+
+  const year = Number(periodId);
+  if (!Number.isInteger(year)) return null;
+
+  return (
+    snapshot.periods
+      .filter(
+        (period) =>
+          /^\d{4}$/.test(period.id) && Number(period.id) < year,
+      )
+      .sort((a, b) => Number(a.id) - Number(b.id))[0] || null
+  );
 }
 
 export function calculateRankChanges(

@@ -17,12 +17,15 @@ export default async function Home({
     partido?: string;
     periodo?: string;
     indice?: string;
+    comparacao?: string;
   }>;
 }) {
   const context = await searchParams;
   const initialIndex =
     context.indice === "valor-publico" ? "public-value" : "current";
   const initialPeriod = resolvePeriod(context.periodo);
+  const initialComparison =
+    context.comparacao === "ano-a-ano" ? "previous-year" : "legislature-start";
   const { states, parties } = getPeriodFacets(initialPeriod.id);
   const initialState = context.uf && states.includes(context.uf) ? context.uf : "all";
   const initialParty =
@@ -77,6 +80,7 @@ export default async function Home({
             initialState={initialState}
             initialParty={initialParty}
             initialPeriod={initialPeriod.id}
+            initialComparison={initialComparison}
           />
         </div>
       </main>

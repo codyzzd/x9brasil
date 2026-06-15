@@ -17,12 +17,13 @@ import {
   calculateRanking,
   calculateRankChanges,
   filterRankingCohort,
+  comparisonPeriod,
   getRankingPeriod,
   materializePeriod,
-  previousAnnualPeriod,
   searchRankedDeputies,
   type PublicValueRankedDeputy,
   type RankedDeputy,
+  type RankingComparison,
   type RankingIndex,
   type RankingSnapshot,
 } from "@/lib/ranking";
@@ -41,18 +42,22 @@ export function RankingBrowser({
   initialState = "all",
   initialParty = "all",
   initialPeriod,
+  initialComparison = "legislature-start",
 }: {
   snapshot: RankingSnapshot;
   initialIndex?: RankingIndex;
   initialState?: string;
   initialParty?: string;
   initialPeriod: string;
+  initialComparison?: RankingComparison;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState<RankingIndex>(initialIndex);
   const [period, setPeriod] = useState(initialPeriod);
+  const [comparison, setComparison] =
+    useState<RankingComparison>(initialComparison);
   const [state, setState] = useState(initialState);
   const [party, setParty] = useState(initialParty);
   const [order, setOrder] = useState<RankingOrder>("score");
@@ -104,7 +109,7 @@ export function RankingBrowser({
     });
   }, [cohort, direction, index, order, party, periodDeputies, state]);
 
-  const previousPeriod = previousAnnualPeriod(snapshot, period);
+  const previousPeriod = comparisonPeriod(snapshot, period, comparison);
   const previousRanked = useMemo(() => {
     if (!previousPeriod) return null;
     const previousDeputies = materializePeriod(snapshot, previousPeriod.id);
@@ -145,10 +150,13 @@ export function RankingBrowser({
     const context = new URLSearchParams();
     context.set("indice", index === "public-value" ? "valor-publico" : "atual");
     context.set("periodo", period);
+    if (comparison === "previous-year") {
+      context.set("comparacao", "ano-a-ano");
+    }
     if (state !== "all") context.set("uf", state);
     if (party !== "all") context.set("partido", party);
     return `?${context.toString()}`;
-  }, [index, party, period, state]);
+  }, [comparison, index, party, period, state]);
 
   useEffect(() => {
     router.replace(`${pathname}${contextQuery}`, { scroll: false });
@@ -156,6 +164,7 @@ export function RankingBrowser({
 
   const reset = () => {
     setPeriod(snapshot.defaultPeriod);
+    setComparison("legislature-start");
     setIndex("current");
     setState("all");
     setParty("all");
@@ -168,6 +177,7 @@ export function RankingBrowser({
     <RankingFilters
       index={index}
       period={period}
+      comparison={comparison}
       state={state}
       party={party}
       order={order}
@@ -191,6 +201,7 @@ export function RankingBrowser({
         setParty("all");
         setVisible(PAGE_SIZE);
       }}
+      onComparisonChange={setComparison}
       onStateChange={(value) => {
         setState(value);
         setVisible(PAGE_SIZE);

@@ -28,6 +28,7 @@ import {
   type RankingIndex,
 } from "@/lib/ranking";
 import { dimensionExplanation } from "@/lib/dimension-explanations";
+import { labelTone } from "@/lib/label-tone";
 import { cn } from "@/lib/utils";
 import { DimensionScore } from "./dimension-score";
 import { SemanticScore } from "./semantic-score";
@@ -468,18 +469,15 @@ function publicDimension(
 }
 
 function labelStyle(label: string) {
-  if (
-    label.includes("alta") ||
-    label.includes("equilibrado")
-  ) {
+  const tone = labelTone(label);
+
+  if (tone === "positive") {
     return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400";
   }
-  if (
-    label.includes("abaixo") ||
-    label.includes("concentrados") ||
-    label.includes("incompletos")
-  ) {
+
+  if (tone === "negative") {
     return "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400";
   }
+
   return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400";
 }

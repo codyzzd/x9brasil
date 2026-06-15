@@ -98,7 +98,7 @@ export function CandidateComparison({
 
   return (
     <div className="space-y-6">
-      <Card>
+      <Card className="overflow-visible">
         <CardContent className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_48px_minmax(0,1fr)_180px_220px] lg:items-end">
           <CandidatePicker
             key={`candidate-a-${selectedA || "empty"}-${period}`}
@@ -596,7 +596,7 @@ function MetricSection({
   return (
     <ComparisonSection title={title} description={description}>
       <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b pb-3 text-xs font-medium text-muted-foreground md:grid-cols-[minmax(0,1fr)_180px_minmax(0,1fr)]">
-        <span className="truncate">{leftName}</span>
+        <span className="truncate text-right">{leftName}</span>
         <span className="hidden text-center md:block">Métrica</span>
         <span className="truncate text-right md:text-left">{rightName}</span>
       </div>
@@ -608,7 +608,7 @@ function MetricSection({
           <MetricValue
             value={row.left}
             format={row.format}
-            className="row-start-2 md:row-auto"
+            className="row-start-2 text-right md:row-auto"
           />
           <div className="col-span-2 row-start-1 text-center md:col-span-1 md:col-start-2 md:row-auto">
             <p className="text-xs font-medium text-muted-foreground">

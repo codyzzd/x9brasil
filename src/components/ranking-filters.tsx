@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { RankingIndex } from "@/lib/ranking";
+import type { RankingComparison, RankingIndex } from "@/lib/ranking";
 
 export type RankingOrder =
   | "score"
@@ -24,6 +24,7 @@ export type RankingOrder =
 export function RankingFilters({
   index,
   period,
+  comparison,
   state,
   party,
   order,
@@ -31,6 +32,7 @@ export function RankingFilters({
   states,
   parties,
   onPeriodChange,
+  onComparisonChange,
   onIndexChange,
   onStateChange,
   onPartyChange,
@@ -39,6 +41,7 @@ export function RankingFilters({
 }: {
   index: RankingIndex;
   period: string;
+  comparison: RankingComparison;
   state: string;
   party: string;
   order: RankingOrder;
@@ -47,6 +50,7 @@ export function RankingFilters({
   parties: string[];
   onIndexChange: (value: RankingIndex) => void;
   onPeriodChange: (value: string) => void;
+  onComparisonChange: (value: RankingComparison) => void;
   onStateChange: (value: string) => void;
   onPartyChange: (value: string) => void;
   onOrderChange: (value: RankingOrder) => void;
@@ -98,6 +102,31 @@ export function RankingFilters({
                 {item.label}
               </SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+      </FilterField>
+      <FilterField label="Comparar posição com">
+        <Select
+          value={comparison}
+          disabled={!/^\d{4}$/.test(period)}
+          onValueChange={(value) =>
+            onComparisonChange(
+              (value ?? "legislature-start") as RankingComparison,
+            )
+          }
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue>
+              {comparison === "previous-year"
+                ? "Ano anterior"
+                : `Início da legislatura (${firstAnnualPeriod(periods)})`}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="legislature-start">
+              Início da legislatura ({firstAnnualPeriod(periods)})
+            </SelectItem>
+            <SelectItem value="previous-year">Ano anterior</SelectItem>
           </SelectContent>
         </Select>
       </FilterField>
@@ -171,6 +200,16 @@ export function RankingFilters({
         A busca por nome apenas localiza o parlamentar.
       </div>
     </div>
+  );
+}
+
+function firstAnnualPeriod(
+  periods: Array<{ id: string; label: string; partial: boolean; end: string }>,
+) {
+  return (
+    periods
+      .filter((period) => /^\d{4}$/.test(period.id))
+      .sort((a, b) => Number(a.id) - Number(b.id))[0]?.label || "indisponível"
   );
 }
 

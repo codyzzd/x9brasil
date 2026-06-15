@@ -4,6 +4,7 @@ import {
   calculatePublicValueRanking,
   calculateRanking,
   calculateRankChanges,
+  comparisonPeriod,
   filterRankingCohort,
   materializePeriod,
   percentileRanks,
@@ -234,4 +235,26 @@ test("rank change is positive when the deputy moves up", () => {
   const current = [{ ...currentDeputy, rank: 3 }];
   const changes = calculateRankChanges(current, previous, "2025");
   assert.equal(changes.get(currentDeputy.id)?.delta, 5);
+});
+
+test("long comparison uses the first available year before the selected period", () => {
+  const snapshot = {
+    defaultPeriod: "2026",
+    periods: [
+      { id: "2023" },
+      { id: "2024" },
+      { id: "2025" },
+      { id: "2026" },
+      { id: "legislature" },
+    ],
+  } as RankingSnapshot;
+
+  assert.equal(
+    comparisonPeriod(snapshot, "2026", "legislature-start")?.id,
+    "2023",
+  );
+  assert.equal(
+    comparisonPeriod(snapshot, "2026", "previous-year")?.id,
+    "2025",
+  );
 });
