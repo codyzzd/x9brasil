@@ -1,5 +1,5 @@
 import { writeFile } from "node:fs/promises";
-import profileDetailsJson from "../src/data/profile-details.json";
+import profileDetailsJson from "../.data/profile-details.json";
 import { classifyProposal } from "../src/lib/public-value";
 import type { ProfileDetailsSnapshot } from "../src/lib/ranking";
 
@@ -30,7 +30,7 @@ async function main() {
     .sort((a, b) => Number(b.year) - Number(a.year) || a.id.localeCompare(b.id));
 
   const output = new URL(
-    "../src/data/public-value-classification-pending.json",
+    "../.data/public-value-classification-pending.json",
     import.meta.url,
   );
   await writeFile(

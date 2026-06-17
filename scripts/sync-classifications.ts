@@ -19,7 +19,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 async function syncProposalClassifications() {
   console.log("Syncing proposal classifications...");
-  const filePath = join(__dirname, "../src/data/public-value-classifications.json");
+  const filePath = join(__dirname, "../.data/public-value-classifications.json");
   const raw = await readFile(filePath, "utf-8");
   const data = JSON.parse(raw);
 
@@ -54,7 +54,7 @@ async function syncProposalClassifications() {
 
 async function syncVoteClassifications() {
   console.log("Syncing vote classifications...");
-  const filePath = join(__dirname, "../src/data/public-vote-classifications.json");
+  const filePath = join(__dirname, "../.data/public-vote-classifications.json");
   const raw = await readFile(filePath, "utf-8");
   const data = JSON.parse(raw);
 
@@ -101,10 +101,10 @@ async function updateMetadata() {
   console.log("Updating snapshot metadata...");
 
   const proposalData = JSON.parse(
-    await readFile(join(__dirname, "../src/data/public-value-classifications.json"), "utf-8")
+    await readFile(join(__dirname, "../.data/public-value-classifications.json"), "utf-8")
   );
   const voteData = JSON.parse(
-    await readFile(join(__dirname, "../src/data/public-vote-classifications.json"), "utf-8")
+    await readFile(join(__dirname, "../.data/public-vote-classifications.json"), "utf-8")
   );
 
   const { error } = await supabase

@@ -44,17 +44,17 @@ export const YEARS = Array.from(
   { length: CURRENT_YEAR - 2022 },
   (_, index) => 2023 + index,
 );
-export const OUTPUT = new URL("../../src/data/ranking-snapshot.json", import.meta.url);
+export const OUTPUT = new URL("../../.data/ranking-snapshot.json", import.meta.url);
 export const PROFILE_OUTPUT = new URL(
-  "../../src/data/profile-details.json",
+  "../../.data/profile-details.json",
   import.meta.url,
 );
 export const PENDING_OUTPUT = new URL(
-  "../../src/data/public-value-classification-pending.json",
+  "../../.data/public-value-classification-pending.json",
   import.meta.url,
 );
 export const PUBLIC_VOTE_PENDING_OUTPUT = new URL(
-  "../../src/data/public-vote-classification-pending.json",
+  "../../.data/public-vote-classification-pending.json",
   import.meta.url,
 );
 export const CHAMBER_API = "https://dadosabertos.camara.leg.br/api/v2";
@@ -62,7 +62,7 @@ export const CHAMBER_FILES = "https://dadosabertos.camara.leg.br/arquivos";
 export const TSE_FILES = "https://cdn.tse.jus.br/estatistica/sead/odsele";
 export const USER_AGENT = "ScoreBrasil/2.0";
 export const BANNER_METADATA_OUTPUT = new URL(
-  "../../src/data/banner-metadata.json",
+  "../../.data/banner-metadata.json",
   import.meta.url,
 );
 export const CACHE_DIR = new URL("../.data-cache", import.meta.url);
@@ -1772,7 +1772,7 @@ export function buildBannerMetadata(
     classifications: Record<string, unknown>;
   } = JSON.parse(
     readFileSync(
-      new URL("../../src/data/public-value-classifications.json", import.meta.url),
+      new URL("../../.data/public-value-classifications.json", import.meta.url),
       "utf-8",
     ),
   );
@@ -1846,7 +1846,7 @@ export async function runFullSync() {
   const classificationPending = buildClassificationPending(accumulators);
   const publicVoteClassificationPending =
     buildPublicVoteClassificationPending(publicVotes);
-  await mkdir(new URL("../../src/data", import.meta.url), { recursive: true });
+  await mkdir(new URL("../../.data", import.meta.url), { recursive: true });
   await writeFile(OUTPUT, `${JSON.stringify(snapshot, null, 2)}\n`);
   await writeFile(
     PROFILE_OUTPUT,
@@ -1930,7 +1930,7 @@ export async function runProcess() {
   const classificationPending = buildClassificationPending(accumulators);
   const publicVoteClassificationPending =
     buildPublicVoteClassificationPending(publicVotes);
-  await mkdir(new URL("../../src/data", import.meta.url), { recursive: true });
+  await mkdir(new URL("../../.data", import.meta.url), { recursive: true });
   await writeFile(OUTPUT, `${JSON.stringify(snapshot, null, 2)}\n`);
   await writeFile(
     PROFILE_OUTPUT,

@@ -18,8 +18,8 @@ import {
 } from "./analyzer";
 import type { FullTextResult } from "./analyzer";
 
-const pendingPath = join(process.cwd(), "src/data/public-vote-classification-pending.json");
-const classificationsPath = join(process.cwd(), "src/data/public-vote-classifications.json");
+const pendingPath = join(process.cwd(), ".data/public-vote-classification-pending.json");
+const classificationsPath = join(process.cwd(), ".data/public-vote-classifications.json");
 
 interface PendingVote {
   id: string;

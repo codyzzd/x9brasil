@@ -44,7 +44,9 @@ next-env.d.ts
 *.csv
 *.bin
 *.zip
-src/data/profile-details.json
+src/data/
+.data/
+.data-cache/
 .llm-cache/
 **/.llm-cache/
 

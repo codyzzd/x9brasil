@@ -15,8 +15,8 @@ import type {
   RankingSnapshot,
 } from "../src/lib/ranking";
 
-const rankingUrl = new URL("../src/data/ranking-snapshot.json", import.meta.url);
-const profileUrl = new URL("../src/data/profile-details.json", import.meta.url);
+const rankingUrl = new URL("../.data/ranking-snapshot.json", import.meta.url);
+const profileUrl = new URL("../.data/profile-details.json", import.meta.url);
 
 function inferStage(status: string): ProposalStage {
   const normalized = status

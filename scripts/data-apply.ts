@@ -25,10 +25,10 @@ import type {
   RankingSnapshot,
 } from "../src/lib/ranking";
 
-const RANKING_PATH = new URL("../src/data/ranking-snapshot.json", import.meta.url);
-const PROFILE_PATH = new URL("../src/data/profile-details.json", import.meta.url);
-const PENDING_PATH = new URL("../src/data/public-value-classification-pending.json", import.meta.url);
-const BANNER_PATH = new URL("../src/data/banner-metadata.json", import.meta.url);
+const RANKING_PATH = new URL("../.data/ranking-snapshot.json", import.meta.url);
+const PROFILE_PATH = new URL("../.data/profile-details.json", import.meta.url);
+const PENDING_PATH = new URL("../.data/public-value-classification-pending.json", import.meta.url);
+const BANNER_PATH = new URL("../.data/banner-metadata.json", import.meta.url);
 
 function inferStage(status: string): ProposalStage {
   const normalized = status
@@ -216,7 +216,7 @@ for (const period of ranking.periods) {
   };
 
   const classificationFile: { classifications: Record<string, unknown> } = JSON.parse(
-    readFileSync(new URL("../src/data/public-value-classifications.json", import.meta.url), "utf-8"),
+    readFileSync(new URL("../.data/public-value-classifications.json", import.meta.url), "utf-8"),
   );
   const classified = Object.keys(classificationFile.classifications).length;
   const pendingCount = pending.total;
@@ -249,7 +249,7 @@ for (const period of ranking.periods) {
     lastUpdatedAt: ranking.generatedAt.split("T")[0],
   };
 
-  await mkdir(new URL("../src/data", import.meta.url), { recursive: true });
+  await mkdir(new URL("../.data", import.meta.url), { recursive: true });
   await writeFile(RANKING_PATH, `${JSON.stringify(ranking, null, 2)}\n`);
   await writeFile(PROFILE_PATH, `${JSON.stringify(profiles)}\n`);
   await writeFile(PENDING_PATH, `${JSON.stringify(pending, null, 2)}\n`);
