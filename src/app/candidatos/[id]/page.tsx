@@ -6,20 +6,13 @@ import {
   ArrowLeft,
   ArrowDown,
   ArrowUp,
-  CalendarDays,
   ExternalLink,
   FileCheck2,
   GitCompareArrows,
-  Landmark,
-  MapPin,
 } from "lucide-react";
-import {
-  AnnualEvolutionChart,
-  type AnnualEvolutionPoint,
-} from "@/components/annual-evolution-chart";
 import { CandidatePeriodSelect } from "@/components/candidate-period-select";
 import { DimensionScore } from "@/components/dimension-score";
-import { SemanticScore } from "@/components/semantic-score";
+import { DimensionCard } from "@/components/dimension-card";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Badge } from "@/components/ui/badge";
@@ -31,29 +24,52 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { getDeputy, getPeriodOptions, rankingSnapshot } from "@/lib/data";
-import { dimensionExplanation } from "@/lib/dimension-explanations";
-import { getProfileDetails } from "@/lib/profile-data";
+import {
+  getDeputy,
+  getDeputies,
+  getFullSnapshot,
+  getProfileDetails,
+  getPeriodOptions,
+} from "@/lib/db";
+import {
+  dimensionExplanation,
+  getDimensionCardInfo,
+} from "@/lib/dimension-explanations";
+import { getCandidateStyle } from "@/lib/candidate-style";
 import {
   calculatePublicValueRanking,
-  calculateRanking,
   calculateRankChanges,
   comparisonPeriod,
   defaultRankingPeriod,
-  filterRankingCohort,
   formatCurrency,
   getRankingPeriod,
   materializePeriod,
+  periodSelectOrder,
+  publicValueScoreLabel,
   type PublicValueRankedDeputy,
   type RankChange,
   type RankedDeputy,
   type RankingComparison,
   type RankingIndex,
+  type RawMetrics,
 } from "@/lib/ranking";
-import { publicValueClassificationMetadata } from "@/lib/public-value";
+import { getSnapshotMetadata } from "@/lib/db";
+import { scoreStyle } from "@/lib/score-style";
 import { cn } from "@/lib/utils";
+import { labelTone } from "@/lib/label-tone";
+import { ProposalsTable } from "@/components/proposals-table";
+import {
+  ExpenseCategoriesTable,
+  LargestExpensesTable,
+  SuppliersTable,
+  PublicVotesTable,
+  VoteDistributionBar,
+  AmendmentsTable,
+  AssetsTable,
+  CampaignDonorsTable,
+  CampaignSuppliersTable,
+} from "@/components/candidate-data-tables";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -61,121 +77,71 @@ type PageProps = {
     uf?: string;
     partido?: string;
     periodo?: string;
-    indice?: string;
     comparacao?: string;
   }>;
 };
 
-export function generateStaticParams() {
-  return rankingSnapshot.deputies.map(({ slug }) => ({ id: slug }));
+export async function generateStaticParams() {
+  const deputies = await getDeputies();
+  return deputies.map((deputy) => ({ id: deputy.slug }));
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const deputy = getDeputy((await params).id);
+  const { id } = await params;
+  const deputy = await getDeputy(id);
   return {
     title: deputy?.name ?? "Deputado",
     description: deputy
-      ? `Atividade legislativa e dados públicos de ${deputy.name}.`
-      : undefined,
+      ? `Atividade legislativa e dados públicos de ${deputy.name} no Score Brasil.`
+      : "Perfil de deputado federal no Score Brasil.",
   };
 }
 
 export default async function DeputyPage({ params, searchParams }: PageProps) {
-  const deputy = getDeputy((await params).id);
+  const { id } = await params;
+  const deputy = await getDeputy(id);
   if (!deputy) notFound();
 
   const context = await searchParams;
-  const index: RankingIndex =
-    context.indice === "valor-publico" ? "public-value" : "current";
+  const snapshot = await getFullSnapshot();
+  const metadata = await getSnapshotMetadata();
+
+  const index: RankingIndex = "public-value";
   const comparison: RankingComparison =
     context.comparacao === "ano-a-ano" ? "previous-year" : "legislature-start";
   const period = getRankingPeriod(
-    rankingSnapshot,
-    context.periodo || defaultRankingPeriod(rankingSnapshot).id,
+    snapshot,
+    context.periodo || defaultRankingPeriod(snapshot).id,
   );
-  const periodDeputies = materializePeriod(rankingSnapshot, period.id);
-  const cohort = filterRankingCohort(
-    periodDeputies,
-    context.uf || "all",
-    context.partido || "all",
-  );
+  const periodDeputies = materializePeriod(snapshot, period.id);
   const ranked =
-    (index === "public-value"
-      ? calculatePublicValueRanking(periodDeputies)
-      : calculateRanking(cohort)
-    ).find((item) => item.id === deputy.id) ||
-    calculateRanking(periodDeputies).find((item) => item.id === deputy.id);
+    calculatePublicValueRanking(periodDeputies).find(
+      (item) => item.id === deputy.id,
+    );
   if (!ranked) notFound();
-  const profile = getProfileDetails(deputy.id, period.id);
+  const profile = await getProfileDetails(deputy.id, period.id);
   const identityDetails = profile.identity;
   const periodDetails = profile.period;
 
   const previousPeriod = comparisonPeriod(
-    rankingSnapshot,
+    snapshot,
     period.id,
     comparison,
   );
   const previousRanked = previousPeriod
-    ? index === "public-value"
-      ? calculatePublicValueRanking(
-          materializePeriod(rankingSnapshot, previousPeriod.id),
-        )
-      : calculateRanking(
-          filterRankingCohort(
-            materializePeriod(rankingSnapshot, previousPeriod.id),
-            context.uf || "all",
-            context.partido || "all",
-          ),
-        )
+    ? calculatePublicValueRanking(
+        materializePeriod(snapshot, previousPeriod.id),
+      )
     : null;
   const rankChange = calculateRankChanges(
     [ranked],
     previousRanked,
     previousPeriod?.label || null,
   ).get(ranked.id);
-  const annualHistory = rankingSnapshot.periods
-    .filter((item) => /^\d{4}$/.test(item.id))
-    .sort((a, b) => Number(a.id) - Number(b.id))
-    .map((item) => {
-      const itemDeputies = materializePeriod(rankingSnapshot, item.id);
-      const itemRanking = (
-        index === "public-value"
-          ? calculatePublicValueRanking(itemDeputies)
-          : calculateRanking(
-              filterRankingCohort(
-                itemDeputies,
-                context.uf || "all",
-                context.partido || "all",
-              ),
-            )
-      ).find((candidate) => candidate.id === deputy.id);
-      return { period: item, ranked: itemRanking || null };
-    });
-  const partialAnnualPeriod = annualHistory.find((item) => item.period.partial)?.period;
-  const annualChartData: AnnualEvolutionPoint[] = annualHistory.map(
-    ({ period: item, ranked: history }) => ({
-      year: item.label,
-      partial: item.partial,
-      rank: history?.rank ?? null,
-      score: history?.score ?? null,
-      participation: history?.dimensions.participation ?? null,
-      production: history
-        ? index === "public-value"
-          ? profileDimension(history, "contribution")
-          : profileDimension(history, "production")
-        : null,
-      resources: history
-        ? index === "public-value"
-          ? profileDimension(history, "efficiency")
-          : profileDimension(history, "resources")
-        : null,
-      transparency: history?.dimensions.transparency ?? null,
-    }),
-  );
-  const classificationMetadata = publicValueClassificationMetadata();
+  const classificationMetadata = { methodologyVersion: "1.0.0", reviewedAt: metadata.sources[0]?.updatedAt ?? new Date().toISOString().split("T")[0] };
+  const candidateStyle = getCandidateStyle(ranked.metrics);
 
   const back = new URLSearchParams();
-  back.set("indice", index === "public-value" ? "valor-publico" : "atual");
   back.set("periodo", period.id);
   if (comparison === "previous-year") {
     back.set("comparacao", "ano-a-ano");
@@ -183,7 +149,6 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
   if (context.uf) back.set("uf", context.uf);
   if (context.partido) back.set("partido", context.partido);
   const periodQuery = new URLSearchParams();
-  periodQuery.set("indice", index === "public-value" ? "valor-publico" : "atual");
   if (comparison === "previous-year" && /^\d{4}$/.test(period.id)) {
     periodQuery.set("comparacao", "ano-a-ano");
   }
@@ -194,259 +159,233 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
       <main className="flex-1">
-        <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-          <Link
-            href={`/${back.size ? `?${back.toString()}` : ""}`}
-            className={cn(buttonVariants({ variant: "ghost" }), "-ml-3 mb-5")}
-          >
-            <ArrowLeft className="size-4" /> Voltar ao ranking
-          </Link>
+        <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
+            <Link
+              href={`/${back.size ? `?${back.toString()}` : ""}`}
+              className={cn(buttonVariants({ variant: "ghost" }), "-ml-3")}
+            >
+              <ArrowLeft className="size-4" /> Voltar ao ranking
+            </Link>
+            <CandidatePeriodSelect
+              period={period.id}
+periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
+                 id,
+                 label,
+               })))}
+              query={periodQuery.toString()}
+            />
+          </div>
 
-          <Card>
-            <CardContent className="flex flex-col gap-5 sm:flex-row sm:items-center">
-              <div className="relative size-28 shrink-0 overflow-hidden rounded-xl bg-muted outline outline-1 -outline-offset-1 outline-black/10">
-                <Image
-                  src={ranked.photoUrl}
-                  alt={`Foto oficial de ${ranked.name}`}
-                  fill
-                  priority
-                  sizes="112px"
-                  className="object-cover object-top"
-                />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="mb-2 flex flex-wrap gap-2">
-                  <Badge>{ranked.party}</Badge>
-                  <Badge variant="outline">{ranked.state}</Badge>
-                  {ranked.electionStatus && (
-                    <Badge variant="secondary">{ranked.electionStatus}</Badge>
-                  )}
+          <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+            <Card>
+              <CardContent className="flex flex-col gap-5 sm:flex-row sm:items-center">
+                <div className="relative size-28 shrink-0 overflow-hidden rounded-xl bg-muted outline outline-1 -outline-offset-1 outline-black/10">
+                  <Image
+                    src={ranked.photoUrl}
+                    alt={`Foto oficial de ${ranked.name}`}
+                    fill
+                    priority
+                    sizes="112px"
+                    className="object-cover object-top"
+                  />
                 </div>
-                <h1 className="text-3xl font-bold tracking-tight text-balance">
-                  {ranked.name}
-                </h1>
-                <p className="mt-1 text-muted-foreground">{ranked.civilName}</p>
-                <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm">
-                  <span className="flex items-center gap-1.5">
-                    <MapPin className="size-4 text-muted-foreground" />
-                    {ranked.state}
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <CalendarDays className="size-4 text-muted-foreground" />
-                    Desde {formatDate(ranked.officeStart)}
-                  </span>
-                  {ranked.electionNumber && (
-                    <span>Número em 2022: {ranked.electionNumber}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    <Badge>{ranked.party}</Badge>
+                    <Badge variant="outline">{ranked.state}</Badge>
+                    {ranked.electionStatus && (
+                      <Badge variant="secondary">{ranked.electionStatus}</Badge>
+                    )}
+                    {candidateStyle && (
+                      <Badge className="border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-900 dark:bg-purple-950/30 dark:text-purple-400">
+                        {candidateStyle.label}
+                      </Badge>
+                    )}
+                  </div>
+                  <h1 className="text-3xl font-bold tracking-tight text-balance">
+                    {ranked.name}
+                  </h1>
+                  <p className="mt-0.5 text-sm text-muted-foreground">{ranked.civilName}</p>
+                  {ranked.labels.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {ranked.labels.map((label) => (
+                        <span
+                          key={label}
+                          className={cn(
+                            "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",
+                            labelStyle(label),
+                          )}
+                        >
+                          {label}
+                        </span>
+                      ))}
+                    </div>
                   )}
-                  {identityDetails?.birthPlace && (
-                    <span>Natural de {identityDetails.birthPlace}</span>
-                  )}
-                  {identityDetails?.education && (
-                    <span>{identityDetails.education}</span>
-                  )}
-                  {identityDetails?.office && <span>{identityDetails.office}</span>}
+                  <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+                    {identityDetails?.birthPlace && (
+                      <span>{identityDetails.birthPlace}</span>
+                    )}
+                    {identityDetails?.education && (
+                      <span>{identityDetails.education}</span>
+                    )}
+                    {identityDetails?.office && <span>{identityDetails.office}</span>}
+                    <span>Desde {formatDate(ranked.officeStart)}</span>
+                    {ranked.electionNumber && (
+                      <span>Nº {ranked.electionNumber}</span>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div className="text-center sm:min-w-36">
-                <p className="text-xs text-muted-foreground">
-                  {ranked.rank
-                    ? `${ranked.rank}º ${
-                        index === "public-value" ? "no Brasil" : "na coorte"
-                      }`
-                    : "Sem posição"}
-                </p>
-                <SemanticScore
-                  value={ranked.score}
-                  index={index}
-                  className="mt-2 w-full justify-center"
-                />
-                <ProfileRankTrend change={rankChange} />
-                <Link
-                  href={`/comparar?a=${encodeURIComponent(
-                    ranked.slug,
-                  )}&periodo=${encodeURIComponent(period.id)}&indice=${
-                    index === "public-value" ? "valor-publico" : "atual"
-                  }`}
-                  className={cn(
-                    buttonVariants({ variant: "outline", size: "sm" }),
-                    "mt-4 w-full",
-                  )}
-                >
-                  <GitCompareArrows className="size-3.5" /> Comparar candidato
-                </Link>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          <Card className="mt-6">
-            <CardContent>
-              <CandidatePeriodSelect
-                period={period.id}
-                periods={getPeriodOptions().map(({ id, label }) => ({
-                  id,
-                  label,
-                }))}
-                query={periodQuery.toString()}
-              />
-            </CardContent>
-          </Card>
+            <Card>
+              <CardContent className="space-y-3 py-4">
+                <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start">
+                  <div className="flex flex-col items-center gap-1 lg:min-w-28">
+                    {(() => {
+                      const style = scoreStyle(ranked.score, index);
+                      return (
+                        <>
+                          <p className="text-xs text-muted-foreground">
+                            {ranked.rank
+                              ? `${ranked.rank}º no Brasil`
+                              : "Sem posição"}
+                          </p>
+                          <div className={cn("flex flex-col items-center rounded-lg border px-4 py-2", style.soft, style.border)}>
+                            <span className={cn("text-2xl font-bold tabular-nums leading-none lg:text-3xl", style.text)}>
+                              {ranked.score ?? "—"}
+                            </span>
+                            <span className={cn("mt-0.5 text-xs font-medium", style.text)}>
+                              {publicValueScoreLabel(ranked.score)}
+                            </span>
+                          </div>
+                          <ProfileRankTrend change={rankChange} />
+                        </>
+                      );
+                    })()}
+                  </div>
 
-          <Card className="mt-6 min-w-0 overflow-hidden">
-            <CardHeader>
-              <CardTitle>Evolução anual</CardTitle>
-              <CardDescription>
-                {index === "public-value"
-                  ? "Posição e percentis calculados nacionalmente em cada período."
-                  : "Posição e score recalculados na mesma coorte de estado e partido."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <AnnualEvolutionChart
-                data={annualChartData}
-                productionLabel={
-                  index === "public-value" ? "Contribuição" : "Produção"
-                }
-                resourcesLabel={
-                  index === "public-value" ? "Eficiência" : "Recursos"
-                }
-              />
-              {partialAnnualPeriod && (
-                <p className="mt-3 text-xs text-muted-foreground">
-                  * Ano em andamento, com dados até{" "}
-                  {formatDate(partialAnnualPeriod.end)}.
-                </p>
-              )}
-            </CardContent>
-          </Card>
+                  <div className="flex-1 space-y-1 self-stretch">
+                    <DimensionScore
+                      label="Contribuição pública"
+                      value={profileDimension(ranked, "contribution")}
+                      explanation={dimensionExplanation(ranked, index, "contribution")}
+                      index={index}
+                      compact
+                    />
+                    <DimensionScore
+                      label="Votos públicos"
+                      value={profileDimension(ranked, "publicVotes")}
+                      explanation={dimensionExplanation(ranked, index, "publicVotes")}
+                      index={index}
+                      compact
+                    />
+                    <DimensionScore
+                      label="Eficiência financeira"
+                      value={profileDimension(ranked, "efficiency")}
+                      explanation={dimensionExplanation(ranked, index, "efficiency")}
+                      index={index}
+                      compact
+                    />
+                    <DimensionScore
+                      label="Participação"
+                      value={ranked.dimensions.participation}
+                      explanation={dimensionExplanation(ranked, index, "participation")}
+                      index={index}
+                      compact
+                    />
+                    <DimensionScore
+                      label="Finanças de campanha"
+                      value={ranked.dimensions.campaignFinance}
+                      explanation={dimensionExplanation(ranked, index, "campaignFinance")}
+                      index={index}
+                      compact
+                    />
+                  </div>
+                </div>
 
-          <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
-            <Tabs defaultValue="gastos" className="min-w-0">
+                <p className="rounded-md bg-muted p-2 text-xs leading-5 text-muted-foreground">
+                    {ranked.metrics.publicClassifiedProposals || 0} de{" "}
+                    {ranked.metrics.publicTotalProposals || 0} proposições
+                    classificadas. Revisado em{" "}
+                    {formatDate(classificationMetadata.reviewedAt)}.
+                  </p>
+
+                <div className="flex gap-2">
+                  <Link
+                    href={`/comparar?a=${encodeURIComponent(ranked.slug)}&periodo=${encodeURIComponent(period.id)}`}
+                    className={cn(buttonVariants({ variant: "outline", size: "sm" }), "flex-1")}
+                  >
+                    <GitCompareArrows className="size-3.5" /> Comparar
+                  </Link>
+                  <Link
+                    href="/metodologia"
+                    className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "px-3")}
+                  >
+                    <FileCheck2 className="size-4" />
+                  </Link>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="mt-6">
+            <Tabs defaultValue="contribuicao">
               <TabsList className="w-full max-w-full justify-start overflow-x-auto">
-                <TabsTrigger value="gastos">Gastos da cota</TabsTrigger>
-                <TabsTrigger value="fornecedores">Quem recebeu</TabsTrigger>
-                <TabsTrigger value="equipe">Equipe</TabsTrigger>
-                <TabsTrigger value="producao">Produção legislativa</TabsTrigger>
-                {index === "public-value" && (
-                  <TabsTrigger value="votos-publicos">Votos públicos</TabsTrigger>
-                )}
-                <TabsTrigger value="emendas">Emendas</TabsTrigger>
-                <TabsTrigger value="patrimonio">Patrimônio</TabsTrigger>
-                <TabsTrigger value="fontes">Fontes</TabsTrigger>
+                <TabsTrigger value="contribuicao">Contribuição pública</TabsTrigger>
+                <TabsTrigger value="votos-publicos">Votos públicos</TabsTrigger>
+                <TabsTrigger value="eficiencia">Eficiência financeira</TabsTrigger>
+                <TabsTrigger value="participacao">Participação</TabsTrigger>
+                <TabsTrigger value="financas-de-campanha">Finanças de campanha</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="producao" className="mt-5">
+              <TabsContent value="contribuicao" className="mt-5">
                 <div className="space-y-5">
+                  <DimensionCard
+                    label="Contribuição pública"
+                    value={ranked.dimensions.contribution}
+                    explanation={dimensionExplanation(ranked, index, "contribution")}
+                    cardInfo={getDimensionCardInfo(ranked.metrics, ranked.dimensions.contribution, "contribution")}
+                  />
                   <Card>
-                  <CardHeader>
-                    <CardTitle>Produção legislativa</CardTitle>
-                    <CardDescription>
-                        Propostas apresentadas e participação registrada no período.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-4 sm:grid-cols-2">
-                    <MetricCard
-                      label="Propostas substantivas"
-                      value={ranked.metrics.substantiveProposals}
-                      detail="PL, PLP, PEC, PDL e PRC"
-                    />
-                    <MetricCard
-                      label="Fiscalização"
-                      value={ranked.metrics.oversightProposals}
-                      detail="RIC e PFC"
-                    />
-                    <MetricCard
-                      label="Propostas que avançaram"
-                      value={ranked.metrics.advancedProposals}
-                      detail="Mais de uma etapa de tramitação"
-                    />
-                    <MetricCard
-                      label="Transformadas em norma"
-                      value={ranked.metrics.convertedProposals}
-                      detail="Resultado adicional, não atribuição exclusiva"
-                    />
-                      <MetricCard
-                        label="Sessões deliberativas"
-                        value={ranked.metrics.plenaryAttendances}
-                        detail="Presenças publicadas pela Câmara"
-                      />
-                      <MetricCard
-                        label="Votos nominais"
-                        value={ranked.metrics.nominalVotes}
-                        detail="Votos individuais registrados"
-                      />
-                  </CardContent>
+                    <CardHeader>
+                      <CardTitle>Produção legislativa</CardTitle>
+                      <CardDescription>
+                        Distribuição dos papéis do parlamentar nas proposições em que teve participação registrada no período.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <ParticipationBar metrics={ranked.metrics} />
+                      <div className="mt-6 grid gap-4 sm:grid-cols-3">
+                        <MetricCard
+                          label="Propostas que avançaram"
+                          value={ranked.metrics.advancedProposals}
+                          detail="Mais de uma etapa de tramitação"
+                        />
+                        <MetricCard
+                          label="Transformadas em norma"
+                          value={ranked.metrics.convertedProposals}
+                          detail="Resultado adicional, não atribuição exclusiva"
+                        />
+                        <MetricCard
+                          label="Votos nominais"
+                          value={ranked.metrics.nominalVotes}
+                          detail="Votos individuais registrados"
+                        />
+                      </div>
+                    </CardContent>
                   </Card>
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-lg">Propostas apresentadas</CardTitle>
+                      <CardTitle className="text-lg">Proposições registradas</CardTitle>
                       <CardDescription>
-                        Até 10 propostas substantivas ou de fiscalização mais recentes.
-                        {index === "public-value"
-                          ? " A memória de cálculo aparece quando a classificação está disponível."
-                          : ""}
+                        Proposições em que o parlamentar teve participação registrada, incluindo autorias, coautorias e requisições. Use a busca para filtrar por ementa, tipo, número ou ano.
                       </CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-3">
+                    <CardContent>
                       {periodDetails?.proposals.length ? (
-                        periodDetails.proposals.map((proposal) => (
-                          <a
-                            key={proposal.id}
-                            href={proposal.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="block rounded-lg border p-4 hover:bg-muted"
-                          >
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <p className="font-semibold">
-                                {proposal.type} {proposal.number}/{proposal.year}
-                              </p>
-                              <span className="text-xs text-muted-foreground">
-                                {formatDate(proposal.date)}
-                              </span>
-                            </div>
-                            <p className="mt-2 text-sm text-pretty">
-                              {proposal.summary}
-                            </p>
-                            <p className="mt-2 text-xs text-muted-foreground">
-                              {proposal.status}
-                            </p>
-                            {index === "public-value" && (
-                              <div className="mt-3 rounded-md bg-muted p-3 text-xs">
-                                {proposal.publicValue ? (
-                                  <>
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <Badge variant="secondary">
-                                        {proposal.publicValue.categoryLabel}
-                                      </Badge>
-                                      <span className="font-semibold tabular-nums">
-                                        {proposal.publicValue.points.toLocaleString(
-                                          "pt-BR",
-                                          { maximumFractionDigits: 2 },
-                                        )}{" "}
-                                        pontos
-                                      </span>
-                                    </div>
-                                    <p className="mt-2 text-muted-foreground">
-                                      Peso {proposal.publicValue.categoryWeight} ×
-                                      estágio{" "}
-                                      {stageLabel(proposal.publicValue.stage)} (
-                                      {proposal.publicValue.stageMultiplier
-                                        .toLocaleString("pt-BR")})
-                                    </p>
-                                    <p className="mt-1 text-muted-foreground">
-                                      {proposal.publicValue.justification}
-                                    </p>
-                                  </>
-                                ) : (
-                                  <p className="text-muted-foreground">
-                                    Classificação pendente de revisão. Esta proposta
-                                    não recebeu zero e não entrou no cálculo.
-                                  </p>
-                                )}
-                              </div>
-                            )}
-                          </a>
-                        ))
+                        <ProposalsTable proposals={periodDetails.proposals} />
                       ) : (
                         <EmptyData text="Nenhuma proposta encontrada no período." />
                       )}
@@ -455,191 +394,108 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
                 </div>
               </TabsContent>
 
-              {index === "public-value" && (
-                <TabsContent value="votos-publicos" className="mt-5">
-                  <div className="space-y-5">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Votos públicos analisados</CardTitle>
-                        <CardDescription>
-                          Bônus e penalidades ligados a votações nominais
-                          específicas, com regra conservadora e fonte oficial.
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="grid gap-4 sm:grid-cols-2">
-                        <MetricCard
-                          label="Pontos positivos"
-                          value={formatDecimal(
-                            ranked.metrics.publicVotePositivePoints,
-                          )}
-                          detail="Votos alinhados a votações classificadas como interesse público"
-                        />
-                        <MetricCard
-                          label="Penalidades por voto"
-                          value={formatDecimal(
-                            ranked.metrics.publicVoteNegativePenalties,
-                          )}
-                          detail="Votos contrários ao interesse público em votações classificadas"
-                        />
-                        <MetricCard
-                          label="Penalidades por ausência"
-                          value={formatDecimal(
-                            ranked.metrics.publicVoteAbsencePenalties,
-                          )}
-                          detail="Aplicadas apenas em votações de relevância alta ou crítica"
-                        />
-                        <MetricCard
-                          label="Confiança média"
-                          value={
-                            ranked.metrics.publicVoteAverageConfidence === null ||
-                            ranked.metrics.publicVoteAverageConfidence === undefined
-                              ? null
-                              : `${formatDecimal(
-                                  ranked.metrics.publicVoteAverageConfidence * 100,
-                                )}%`
-                          }
-                          detail={`${ranked.metrics.publicVotesAnalyzed ?? 0} registros auditáveis no período`}
-                        />
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="text-lg">Registros de maior impacto</CardTitle>
-                        <CardDescription>
-                          Até 8 votos ou ausências com maior efeito no período.
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        {periodDetails?.publicVotes?.length ? (
-                          periodDetails.publicVotes.map((vote) => (
-                            <a
-                              key={`${vote.voteId}-${vote.candidateVote}`}
-                              href={vote.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="block rounded-lg border p-4 hover:bg-muted"
-                            >
-                              <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <Badge variant="secondary">
-                                    {publicVoteClassificationLabel(
-                                      vote.classification,
-                                    )}
-                                  </Badge>
-                                  <Badge variant="outline">
-                                    {severityLabel(vote.severity)}
-                                  </Badge>
-                                </div>
-                                <span
-                                  className={cn(
-                                    "font-semibold tabular-nums",
-                                    vote.scoreDelta < 0
-                                      ? "text-red-700 dark:text-red-400"
-                                      : vote.scoreDelta > 0
-                                        ? "text-emerald-700 dark:text-emerald-400"
-                                        : "text-muted-foreground",
-                                  )}
-                                >
-                                  {vote.scoreDelta > 0 ? "+" : ""}
-                                  {formatDecimal(vote.scoreDelta)}
-                                </span>
-                              </div>
-                              <p className="mt-2 text-sm text-pretty">
-                                {vote.description}
-                              </p>
-                              {vote.summary && (
-                                <p className="mt-1 text-xs text-muted-foreground text-pretty">
-                                  {vote.summary}
-                                </p>
-                              )}
-                              <p className="mt-3 text-xs text-muted-foreground">
-                                Voto: {candidateVoteLabel(vote.candidateVote)} ·
-                                confiança {formatDecimal(vote.confidence * 100)}% ·{" "}
-                                {vote.reason}
-                              </p>
-                            </a>
-                          ))
-                        ) : (
-                          <EmptyData text="Nenhuma votação classificada entrou no cálculo deste período." />
-                        )}
-                      </CardContent>
-                    </Card>
-                  </div>
-                </TabsContent>
-              )}
-
-              <TabsContent value="equipe" className="mt-5">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Equipe do gabinete</CardTitle>
-                    <CardDescription>
-                      Retrato atual publicado pela Câmara; não muda com o ano selecionado.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="mb-4 text-3xl font-semibold tabular-nums">
-                      {identityDetails?.staff.length || 0}
-                      <span className="ml-2 text-sm font-normal text-muted-foreground">
-                        secretários parlamentares
-                      </span>
-                    </p>
-                    <div className="divide-y rounded-lg border">
-                      {identityDetails?.staff.length ? (
-                        identityDetails.staff.map((person) => (
-                          <div
-                            key={`${person.name}-${person.role}`}
-                            className="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between"
-                          >
-                            <p className="font-medium">{person.name}</p>
-                            <div className="text-xs text-muted-foreground sm:text-right">
-                              <p>{person.role}</p>
-                              {person.startDate && (
-                                <p>Desde {formatDate(person.startDate)}</p>
-                              )}
-                            </div>
+              <TabsContent value="votos-publicos" className="mt-5">
+                <div className="space-y-5">
+                  <DimensionCard
+                    label="Votos públicos"
+                    value={ranked.dimensions.publicVotes}
+                    explanation={dimensionExplanation(ranked, index, "publicVotes")}
+                    cardInfo={getDimensionCardInfo(ranked.metrics, ranked.dimensions.publicVotes, "publicVotes")}
+                  />
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Votos públicos analisados</CardTitle>
+                      <CardDescription>
+                        Bônus e penalidades ligados a votações nominais específicas, com regra conservadora e fonte oficial.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid gap-4 sm:grid-cols-2">
+                      <MetricCard
+                        label="Pontos positivos"
+                        value={formatDecimal(ranked.metrics.publicVotePositivePoints)}
+                        detail="Votos alinhados a votações classificadas como interesse público"
+                      />
+                      <MetricCard
+                        label="Penalidades por voto"
+                        value={formatDecimal(ranked.metrics.publicVoteNegativePenalties)}
+                        detail="Votos contrários ao interesse público em votações classificadas"
+                      />
+                      <MetricCard
+                        label="Penalidades por ausência"
+                        value={formatDecimal(ranked.metrics.publicVoteAbsencePenalties)}
+                        detail="Aplicadas apenas em votações de relevância alta ou crítica"
+                      />
+                      <MetricCard
+                        label="Confiança média"
+                        value={
+                          ranked.metrics.publicVoteAverageConfidence === null ||
+                          ranked.metrics.publicVoteAverageConfidence === undefined
+                            ? null
+                            : `${formatDecimal(ranked.metrics.publicVoteAverageConfidence * 100)}%`
+                        }
+                        detail={`${ranked.metrics.publicVotesAnalyzed ?? 0} registros auditáveis no período`}
+                      />
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Votos públicos registrados</CardTitle>
+                      <CardDescription>
+                        Votações nominais classificadas e seus impactos no score. Use a busca para filtrar por descrição.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {periodDetails?.publicVotes?.length ? (
+                        <>
+                          <VoteDistributionBar data={periodDetails.publicVotes} />
+                          <div className="mt-5">
+                            <PublicVotesTable data={periodDetails.publicVotes} />
                           </div>
-                        ))
+                        </>
                       ) : (
-                        <EmptyData text="Equipe não disponível no arquivo atual." />
+                        <EmptyData text="Nenhuma votação classificada entrou no cálculo deste período." />
                       )}
-                    </div>
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
+                </div>
               </TabsContent>
 
-              <TabsContent value="gastos" className="mt-5">
+              <TabsContent value="eficiencia" className="mt-5">
                 <div className="space-y-5">
+                  <DimensionCard
+                    label="Eficiência financeira"
+                    value={ranked.dimensions.efficiency}
+                    explanation={dimensionExplanation(ranked, index, "efficiency")}
+                    cardInfo={getDimensionCardInfo(ranked.metrics, ranked.dimensions.efficiency, "efficiency")}
+                  />
                   <Card>
-                  <CardHeader>
+                    <CardHeader>
                       <CardTitle>Gastos da cota parlamentar</CardTitle>
-                    <CardDescription>
-                        Despesas líquidas da CEAP entre {formatDate(period.start)} e{" "}
-                        {formatDate(period.end)}.
-                    </CardDescription>
-                  </CardHeader>
+                      <CardDescription>
+                        Despesas líquidas da CEAP entre {formatDate(period.start)} e {formatDate(period.end)}.
+                      </CardDescription>
+                    </CardHeader>
                     <CardContent className="grid gap-4 sm:grid-cols-3">
-                    <MetricCard
-                      label="Despesas líquidas"
-                      value={formatCurrency(ranked.metrics.expensesTotal)}
-                      detail="Total da CEAP no período"
-                    />
-                    <MetricCard
-                      label="Documentos"
-                      value={ranked.metrics.expenseDocuments}
-                      detail="Registros de despesa publicados"
-                    />
-                    <MetricCard
-                      label="Concentração"
-                      value={
-                        ranked.metrics.supplierConcentration === null
-                          ? null
-                          : `${Math.round(
-                              ranked.metrics.supplierConcentration * 100,
-                            )}%`
-                      }
-                      detail="Índice HHI por fornecedor; menor é mais distribuído"
-                    />
-                  </CardContent>
+                      <MetricCard
+                        label="Despesas líquidas"
+                        value={formatCurrency(ranked.metrics.expensesTotal)}
+                        detail="Total da CEAP no período"
+                      />
+                      <MetricCard
+                        label="Documentos"
+                        value={ranked.metrics.expenseDocuments}
+                        detail="Registros de despesa publicados"
+                      />
+                      <MetricCard
+                        label="Concentração"
+                        value={
+                          ranked.metrics.supplierConcentration === null
+                            ? null
+                            : `${Math.round(ranked.metrics.supplierConcentration * 100)}%`
+                        }
+                        detail="Índice HHI por fornecedor; menor é mais distribuído"
+                      />
+                    </CardContent>
                   </Card>
                   <Card>
                     <CardHeader>
@@ -649,13 +505,11 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <MoneyList
-                        rows={(periodDetails?.expenseCategories || []).map((item) => ({
-                          label: item.name,
-                          value: item.total,
-                          detail: `${item.documents} documentos`,
-                        }))}
-                      />
+                      {periodDetails?.expenseCategories.length ? (
+                        <ExpenseCategoriesTable data={periodDetails.expenseCategories} />
+                      ) : (
+                        <EmptyData text="Nenhuma categoria encontrada." />
+                      )}
                     </CardContent>
                   </Card>
                   <Card>
@@ -665,337 +519,296 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
                         Links abrem o documento oficial quando publicado pela Câmara.
                       </CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-3">
+                    <CardContent>
                       {periodDetails?.largestExpenses.length ? (
-                        periodDetails.largestExpenses.map((expense, index) => (
-                          <div
-                            key={`${expense.date}-${expense.supplier}-${index}`}
-                            className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between"
-                          >
-                            <div className="min-w-0">
-                              <p className="truncate font-medium">
-                                {expense.category}
-                              </p>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                {expense.supplier} · {formatDate(expense.date)}
-                              </p>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-3">
-                              <span className="font-semibold tabular-nums">
-                                {formatCurrency(expense.value)}
-                              </span>
-                              {expense.documentUrl && (
-                                <a
-                                  href={expense.documentUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className={buttonVariants({
-                                    variant: "outline",
-                                    size: "sm",
-                                  })}
-                                >
-                                  Nota <ExternalLink className="size-3.5" />
-                                </a>
-                              )}
-                            </div>
-                          </div>
-                        ))
+                        <LargestExpensesTable data={periodDetails.largestExpenses} />
                       ) : (
                         <EmptyData text="Nenhuma despesa encontrada no período." />
+                      )}
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Quem recebeu recursos da cota</CardTitle>
+                      <CardDescription>
+                        Fornecedores no período selecionado.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {periodDetails?.suppliers.length ? (
+                        <SuppliersTable data={periodDetails.suppliers} />
+                      ) : (
+                        <EmptyData text="Nenhum fornecedor encontrado." />
+                      )}
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Emendas parlamentares</CardTitle>
+                      <CardDescription>
+                        Até 10 maiores registros do Transferegov associados ao nome do parlamentar.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="mb-5 grid gap-4 sm:grid-cols-2">
+                        <MetricCard
+                          label="Valor indicado nos registros"
+                          value={formatCurrency(
+                            (periodDetails?.amendments || []).reduce(
+                              (sum, item) => sum + item.proposedValue, 0,
+                            ),
+                          )}
+                          detail={`${periodDetails?.amendments.length || 0} registros exibidos`}
+                        />
+                        <MetricCard
+                          label="Repasse nos registros"
+                          value={formatCurrency(
+                            (periodDetails?.amendments || []).reduce(
+                              (sum, item) => sum + item.transferredValue, 0,
+                            ),
+                          )}
+                          detail="Valor informado no arquivo oficial"
+                        />
+                      </div>
+                      {periodDetails?.amendments.length ? (
+                        <AmendmentsTable data={periodDetails.amendments} />
+                      ) : (
+                        <EmptyData text="Nenhuma emenda individual vinculada no período." />
                       )}
                     </CardContent>
                   </Card>
                 </div>
               </TabsContent>
 
-              <TabsContent value="fornecedores" className="mt-5">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Quem recebeu recursos da cota</CardTitle>
-                    <CardDescription>
-                      Dez maiores fornecedores no período selecionado.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <MoneyList
-                      rows={(periodDetails?.suppliers || []).map((supplier) => ({
-                        label: supplier.name,
-                        value: supplier.total,
-                        detail: `${supplier.documents} documentos${
-                          supplier.taxId ? ` · ${supplier.taxId}` : ""
-                        }`,
-                      }))}
-                    />
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="emendas" className="mt-5">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Emendas parlamentares</CardTitle>
-                    <CardDescription>
-                      Até 10 maiores registros do Transferegov associados ao nome
-                      do parlamentar.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="mb-5 grid gap-4 sm:grid-cols-2">
-                      <MetricCard
-                        label="Valor indicado nos registros"
-                        value={formatCurrency(
-                          (periodDetails?.amendments || []).reduce(
-                            (sum, item) => sum + item.proposedValue,
-                            0,
-                          ),
-                        )}
-                        detail={`${periodDetails?.amendments.length || 0} registros exibidos`}
-                      />
-                      <MetricCard
-                        label="Repasse nos registros"
-                        value={formatCurrency(
-                          (periodDetails?.amendments || []).reduce(
-                            (sum, item) => sum + item.transferredValue,
-                            0,
-                          ),
-                        )}
-                        detail="Valor informado no arquivo oficial"
-                      />
-                    </div>
-                    {periodDetails?.amendments.length ? (
-                      <div className="divide-y rounded-lg border">
-                        {periodDetails.amendments.map((amendment, index) => (
-                          <div
-                            key={`${amendment.number}-${amendment.beneficiary}-${index}`}
-                            className="grid gap-2 p-4 sm:grid-cols-[1fr_auto]"
-                          >
-                            <div>
-                              <p className="font-medium">
-                                Emenda {amendment.number} · {amendment.type}
-                              </p>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                Beneficiário: {amendment.beneficiary}
-                              </p>
-                            </div>
-                            <div className="text-sm tabular-nums sm:text-right">
-                              <p className="font-semibold">
-                                {formatCurrency(amendment.transferredValue)}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                Indicado: {formatCurrency(amendment.proposedValue)}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <EmptyData text="Nenhuma emenda individual vinculada no período." />
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="patrimonio" className="mt-5">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Patrimônio declarado em 2022</CardTitle>
-                    <CardDescription>
-                      Bens informados à Justiça Eleitoral pelo próprio candidato.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <MetricCard
-                      label="Total declarado"
-                      value={formatCurrency(ranked.assetsTotal)}
-                      detail={
-                        ranked.assetsCount === null
-                          ? "Dados indisponíveis"
-                          : `${ranked.assetsCount} bens declarados`
-                      }
-                    />
-                    <div className="mt-5 divide-y rounded-lg border">
-                      {identityDetails?.assets.length ? (
-                        identityDetails.assets.map((asset, index) => (
-                          <div
-                            key={`${asset.type}-${index}`}
-                            className="grid gap-2 p-4 sm:grid-cols-[1fr_auto]"
-                          >
-                            <div>
-                              <p className="font-medium">{asset.type}</p>
-                              <p className="mt-1 text-xs text-muted-foreground text-pretty">
-                                {asset.description}
-                              </p>
-                            </div>
-                            <p className="font-semibold tabular-nums">
-                              {formatCurrency(asset.value)}
-                            </p>
-                          </div>
-                        ))
-                      ) : (
-                        <EmptyData text="Nenhum bem disponível para esta candidatura." />
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="fontes" className="mt-5">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Rastreabilidade</CardTitle>
-                    <CardDescription>
-                      Confira os dados diretamente nas fontes oficiais.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <SourceLink href={ranked.chamberUrl} label="Perfil na API da Câmara" />
-                    <SourceLink
-                      href="https://dadosabertos.camara.leg.br/"
-                      label="Dados Abertos da Câmara"
-                    />
-                    <SourceLink
-                      href="https://dadosabertos.tse.jus.br/dataset/candidatos-2022"
-                      label="Candidaturas 2022 no TSE"
-                    />
-                    <SourceLink
-                      href="https://dadosabertos.camara.leg.br/arquivos/funcionarios/csv/funcionarios.csv"
-                      label="Quadro atual de funcionários da Câmara"
-                    />
-                    <SourceLink
-                      href="https://repositorio.dados.gov.br/seges/detru/siconv_emenda.csv.zip"
-                      label="Emendas parlamentares no Transferegov"
-                    />
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
-
-            <aside className="space-y-5">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Composição do score</CardTitle>
-                  <CardDescription>
-                    {index === "public-value"
-                      ? "40% contribuição, 20% votos públicos, 20% eficiência, 10% participação e 10% transparência."
-                      : "25% para cada dimensão."}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-5">
-                  {index === "public-value" && (
-                    <DimensionScore
-                      label="Contribuição pública"
-                      value={profileDimension(ranked, "contribution")}
-                      explanation={dimensionExplanation(
-                        ranked,
-                        index,
-                        "contribution",
-                      )}
-                      index={index}
-                    />
-                  )}
-                  {index === "public-value" && (
-                    <DimensionScore
-                      label="Votos públicos"
-                      value={profileDimension(ranked, "publicVotes")}
-                      explanation={dimensionExplanation(
-                        ranked,
-                        index,
-                        "publicVotes",
-                      )}
-                      index={index}
-                    />
-                  )}
-                  {index === "public-value" && (
-                    <DimensionScore
-                      label="Eficiência financeira"
-                      value={profileDimension(ranked, "efficiency")}
-                      explanation={dimensionExplanation(
-                        ranked,
-                        index,
-                        "efficiency",
-                      )}
-                      index={index}
-                    />
-                  )}
-                  <DimensionScore
+              <TabsContent value="participacao" className="mt-5">
+                <div className="space-y-5">
+                  <DimensionCard
                     label="Participação"
                     value={ranked.dimensions.participation}
-                    explanation={dimensionExplanation(
-                      ranked,
-                      index,
-                      "participation",
-                    )}
-                    index={index}
+                    explanation={dimensionExplanation(ranked, index, "participation")}
+                    cardInfo={getDimensionCardInfo(ranked.metrics, ranked.dimensions.participation, "participation")}
                   />
-                  {index === "current" && (
-                    <DimensionScore
-                      label="Produção"
-                      value={profileDimension(ranked, "production")}
-                      explanation={dimensionExplanation(
-                        ranked,
-                        index,
-                        "production",
-                      )}
-                      index={index}
-                    />
-                  )}
-                  {index === "current" && (
-                    <DimensionScore
-                      label="Uso de recursos"
-                      value={profileDimension(ranked, "resources")}
-                      explanation={dimensionExplanation(
-                        ranked,
-                        index,
-                        "resources",
-                      )}
-                      index={index}
-                    />
-                  )}
-                  <DimensionScore
-                    label="Transparência"
-                    value={ranked.dimensions.transparency}
-                    explanation={dimensionExplanation(
-                      ranked,
-                      index,
-                      "transparency",
-                    )}
-                    index={index}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Atuação em plenário</CardTitle>
+                      <CardDescription>
+                        Presenças e votos nominais registrados pela Câmara no período.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <MetricCard
+                          label="Sessões deliberativas"
+                          value={ranked.metrics.plenaryAttendances}
+                          detail="Presenças publicadas pela Câmara"
+                        />
+                        <MetricCard
+                          label="Votos nominais"
+                          value={ranked.metrics.nominalVotes}
+                          detail="Votos individuais registrados"
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Equipe do gabinete</CardTitle>
+                      <CardDescription>
+                        Retrato atual publicado pela Câmara; não muda com o ano selecionado.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="mb-4 text-3xl font-semibold tabular-nums">
+                        {identityDetails?.staff.length || 0}
+                        <span className="ml-2 text-sm font-normal text-muted-foreground">
+                          secretários parlamentares
+                        </span>
+                      </p>
+                      <div className="divide-y rounded-lg border">
+                        {identityDetails?.staff.length ? (
+                          identityDetails.staff.map((person) => (
+                            <div
+                              key={`${person.name}-${person.role}`}
+                              className="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between"
+                            >
+                              <p className="font-medium">{person.name}</p>
+                              <div className="text-xs text-muted-foreground sm:text-right">
+                                <p>{person.role}</p>
+                                {person.startDate && (
+                                  <p>Desde {formatDate(person.startDate)}</p>
+                                )}
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <EmptyData text="Equipe não disponível no arquivo atual." />
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="financas-de-campanha" className="mt-5">
+                <div className="space-y-5">
+                  <DimensionCard
+                    label="Finanças de campanha"
+                    value={ranked.dimensions.campaignFinance}
+                    explanation={dimensionExplanation(ranked, index, "campaignFinance")}
+                    cardInfo={getDimensionCardInfo(ranked.metrics, ranked.dimensions.campaignFinance, "campaignFinance")}
                   />
-                  {index === "public-value" && (
-                    <p className="rounded-md bg-muted p-3 text-xs leading-5 text-muted-foreground">
-                      {ranked.metrics.publicClassifiedProposals || 0} de{" "}
-                      {ranked.metrics.publicTotalProposals || 0} proposições
-                      classificadas. Metodologia revisada em{" "}
-                      {formatDate(classificationMetadata.reviewedAt)}.
-                    </p>
+
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <MetricCard
+                      label="Custo por voto"
+                      value={
+                        ranked.metrics.totalCampaignExpenses !== null && ranked.metrics.totalVotes !== null && ranked.metrics.totalVotes > 0
+                          ? formatCurrency(ranked.metrics.totalCampaignExpenses / ranked.metrics.totalVotes)
+                          : null
+                      }
+                      detail={
+                        ranked.metrics.totalCampaignExpenses !== null && ranked.metrics.totalVotes !== null && ranked.metrics.totalVotes > 0
+                          ? `${formatCurrency(ranked.metrics.totalCampaignExpenses)} gastos / ${formatDecimal(ranked.metrics.totalVotes)} votos`
+                          : "Dados indisponíveis"
+                      }
+                    />
+                    <MetricCard
+                      label="Dependência de dinheiro público"
+                      value={
+                        ranked.metrics.totalPublicReceipts !== null && ranked.metrics.totalCampaignReceipts !== null && ranked.metrics.totalCampaignReceipts > 0
+                          ? formatDecimal((ranked.metrics.totalPublicReceipts / ranked.metrics.totalCampaignReceipts) * 100) + "%"
+                          : null
+                      }
+                      detail={
+                        ranked.metrics.totalPublicReceipts !== null && ranked.metrics.totalCampaignReceipts !== null
+                          ? `${formatCurrency(ranked.metrics.totalPublicReceipts)} de ${formatCurrency(ranked.metrics.totalCampaignReceipts)}`
+                          : "Dados indisponíveis"
+                      }
+                    />
+                    <MetricCard
+                      label="Concentração de receitas"
+                      value={
+                        ranked.metrics.topDonors?.length > 0
+                          ? formatDecimal((ranked.metrics.topDonors.slice(0, 3).reduce((s: number, d: { value: number }) => s + d.value, 0) / ranked.metrics.topDonors.reduce((s: number, d: { value: number }) => s + d.value, 0)) * 100) + "%"
+                          : null
+                      }
+                      detail={
+                        ranked.metrics.topDonors?.length > 0
+                          ? `3 maiores doadores entre ${ranked.metrics.topDonors.length} declarados`
+                          : "Dados indisponíveis"
+                      }
+                    />
+                    <MetricCard
+                      label="Concentração de despesas"
+                      value={
+                        ranked.metrics.topSuppliers?.length > 0
+                          ? formatDecimal((ranked.metrics.topSuppliers.slice(0, 3).reduce((s: number, d: { value: number }) => s + d.value, 0) / ranked.metrics.topSuppliers.reduce((s: number, d: { value: number }) => s + d.value, 0)) * 100) + "%"
+                          : null
+                      }
+                      detail={
+                        ranked.metrics.topSuppliers?.length > 0
+                          ? `3 maiores fornecedores entre ${ranked.metrics.topSuppliers.length} declarados`
+                          : "Dados indisponíveis"
+                      }
+                    />
+                    <MetricCard
+                      label="Receita total"
+                      value={formatCurrency(ranked.metrics.totalCampaignReceipts)}
+                      detail={ranked.metrics.totalCampaignReceipts !== null ? "Receitas declaradas na campanha" : "Dados indisponíveis"}
+                    />
+                    <MetricCard
+                      label="Despesa total"
+                      value={formatCurrency(ranked.metrics.totalCampaignExpenses)}
+                      detail={ranked.metrics.totalCampaignExpenses !== null ? "Despesas declaradas na campanha" : "Dados indisponíveis"}
+                    />
+                  </div>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Cobertura de dados</CardTitle>
+                      <CardDescription>
+                        Fontes de dados disponíveis para este candidato. Dados ausentes não penalizam diretamente o score, mas reduzem a confiança da análise.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <TransparencyBlocks metrics={ranked.metrics} />
+                    </CardContent>
+                  </Card>
+
+                  {ranked.metrics.topDonors?.length > 0 && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Principais doadores</CardTitle>
+                        <CardDescription>
+                          Maiores fontes de receita declaradas na campanha eleitoral.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <CampaignDonorsTable data={ranked.metrics.topDonors} />
+                      </CardContent>
+                    </Card>
                   )}
-                  <Separator />
-                  <Link
-                    href="/metodologia"
-                    className={cn(
-                      buttonVariants({ variant: "outline" }),
-                      "w-full",
-                    )}
-                  >
-                    <FileCheck2 className="size-4" /> Ver metodologia
-                  </Link>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="text-sm">
-                  <p className="flex items-center gap-2 font-medium">
-                    <Landmark className="size-4" /> Contexto da comparação
-                  </p>
-                  <p className="mt-2 text-muted-foreground text-pretty">
-                    {index === "public-value"
-                      ? "A posição experimental é calculada entre todos os deputados elegíveis no período."
-                      : context.uf || context.partido
-                      ? `Comparado com ${cohort.length} deputados do grupo selecionado.`
-                      : `Comparado com ${cohort.length} deputados em exercício no período.`}
-                  </p>
-                </CardContent>
-              </Card>
-            </aside>
+
+                  {ranked.metrics.topSuppliers?.length > 0 && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Principais fornecedores</CardTitle>
+                        <CardDescription>
+                          Maiores destinos de despesa declarados na campanha eleitoral.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <CampaignSuppliersTable data={ranked.metrics.topSuppliers} />
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Patrimônio declarado em 2022</CardTitle>
+                      <CardDescription>
+                        Bens informados à Justiça Eleitoral pelo próprio candidato. Usado como indicador de consistência patrimonial, sem penalizar o candidato por ter muito ou pouco patrimônio.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <MetricCard
+                        label="Total declarado"
+                        value={formatCurrency(ranked.assetsTotal)}
+                        detail={
+                          ranked.assetsCount === null
+                            ? "Dados indisponíveis"
+                            : `${ranked.assetsCount} bens declarados`
+                        }
+                      />
+                      {identityDetails?.assets.length ? (
+                        <div className="mt-5">
+                          <AssetsTable data={identityDetails.assets} />
+                        </div>
+                      ) : (
+                        <div className="mt-5">
+                          <EmptyData text="Nenhum bem disponível para esta candidatura." />
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Rastreabilidade</CardTitle>
+                      <CardDescription>
+                        Confira os dados diretamente nas fontes oficiais.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <SourceLink href={ranked.chamberUrl} label="Perfil na API da Câmara" />
+                      <SourceLink href="https://dadosabertos.camara.leg.br/" label="Dados Abertos da Câmara" />
+                      <SourceLink href="https://dadosabertos.tse.jus.br/dataset/candidatos-2022" label="Candidaturas 2022 no TSE" />
+                      <SourceLink href="https://dadosabertos.camara.leg.br/arquivos/funcionarios/csv/funcionarios.csv" label="Quadro atual de funcionários da Câmara" />
+                      <SourceLink href="https://repositorio.dados.gov.br/seges/detru/siconv_emenda.csv.zip" label="Emendas parlamentares no Transferegov" />
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
         </div>
       </main>
@@ -1024,26 +837,78 @@ function MetricCard({
   );
 }
 
-function MoneyList({
-  rows,
-}: {
-  rows: Array<{ label: string; value: number; detail: string }>;
-}) {
-  if (!rows.length) return <EmptyData text="Dados indisponíveis no período." />;
+const ROLE_SEGMENTS: {
+  key: keyof RawMetrics;
+  label: string;
+  barClass: string;
+  dotClass: string;
+}[] = [
+  {
+    key: "authorProposals",
+    label: "Autoria",
+    barClass: "bg-emerald-500 dark:bg-emerald-400",
+    dotClass: "bg-emerald-500 dark:bg-emerald-400",
+  },
+  {
+    key: "coauthorProposals",
+    label: "Coautoria",
+    barClass: "bg-sky-500 dark:bg-sky-400",
+    dotClass: "bg-sky-500 dark:bg-sky-400",
+  },
+  {
+    key: "requesterProposals",
+    label: "Requisição",
+    barClass: "bg-violet-500 dark:bg-violet-400",
+    dotClass: "bg-violet-500 dark:bg-violet-400",
+  },
+  {
+    key: "fiscalizationProposals",
+    label: "Fiscalização",
+    barClass: "bg-amber-500 dark:bg-amber-400",
+    dotClass: "bg-amber-500 dark:bg-amber-400",
+  },
+];
+
+function ParticipationBar({ metrics }: { metrics: RawMetrics }) {
+  const segments = ROLE_SEGMENTS.map((s) => ({
+    ...s,
+    count: (metrics[s.key] as number) || 0,
+  }));
+  const total = segments.reduce((sum, s) => sum + s.count, 0);
+
+  if (total === 0) {
+    return (
+      <p className="py-6 text-center text-sm text-muted-foreground">
+        Nenhuma proposição com participação registrada no período.
+      </p>
+    );
+  }
+
   return (
-    <div className="divide-y rounded-lg border">
-      {rows.map((row) => (
-        <div
-          key={`${row.label}-${row.detail}`}
-          className="grid gap-2 p-4 sm:grid-cols-[1fr_auto]"
-        >
-          <div className="min-w-0">
-            <p className="font-medium text-pretty">{row.label}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{row.detail}</p>
-          </div>
-          <p className="font-semibold tabular-nums">{formatCurrency(row.value)}</p>
-        </div>
-      ))}
+    <div className="space-y-4">
+        <div className="flex h-2 w-full overflow-hidden rounded-full">
+        {segments.map((s) => {
+          const pct = (s.count / total) * 100;
+          if (pct < 0.5) return null;
+          return (
+            <div
+              key={s.key}
+              className={cn(s.barClass, "transition-all duration-500")}
+              style={{ width: `${pct}%` }}
+              title={`${s.label}: ${s.count} (${Math.round(pct)}%)`}
+            />
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-xs">
+        {segments.map((s) => (
+          <span key={s.key} className="inline-flex items-center gap-1.5">
+            <span className={cn("size-2.5 rounded-full", s.dotClass)} />
+            <span className="tabular-nums font-medium">{s.count}</span>
+            <span className="text-muted-foreground">{s.label}</span>
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1053,6 +918,45 @@ function EmptyData({ text }: { text: string }) {
     <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
       {text}
     </p>
+  );
+}
+
+function TransparencyBlocks({ metrics }: { metrics: RawMetrics }) {
+  const blocks = [
+    ["Candidatura (2022)", metrics.campaignCandidacyAvailable],
+    ["Bens declarados", metrics.assetsAvailable],
+    ["Receitas eleitorais", metrics.totalCampaignReceipts !== null],
+    ["Despesas eleitorais", metrics.totalCampaignExpenses !== null],
+    ["Receitas públicas", metrics.totalPublicReceipts !== null],
+  ] as const;
+  const availableCount = blocks.filter(([, available]) => available).length;
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        {availableCount} de {blocks.length} fontes financeiras encontradas
+      </p>
+      <div className="flex flex-wrap gap-3">
+        {blocks.map(([label, available]) => (
+          <div
+            key={label}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+              available
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400"
+                : "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400",
+            )}
+          >
+            <span className={cn("text-base", available ? "" : "opacity-50")}>
+              {available ? "✓" : "✗"}
+            </span>
+            <span>{label}</span>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Dados ausentes não penalizam diretamente o score do candidato, mas podem reduzir a confiança da análise.
+      </p>
+    </div>
   );
 }
 
@@ -1079,32 +983,19 @@ function formatDecimal(value: number | null | undefined) {
       }).format(value);
 }
 
-function candidateVoteLabel(value: string) {
-  if (value === "yes") return "sim";
-  if (value === "no") return "não";
-  if (value === "absent") return "ausente";
-  return "abstenção";
+function labelStyle(label: string) {
+  const tone = labelTone(label);
+  if (tone === "positive") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400";
+  }
+  if (tone === "negative") {
+    return "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400";
+  }
+  return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400";
 }
 
-function severityLabel(value: string) {
-  if (value === "critical") return "crítica";
-  if (value === "high") return "alta";
-  if (value === "medium") return "média";
-  return "baixa";
-}
-
-function publicVoteClassificationLabel(value: string) {
-  if (value === "positive_public_interest") return "interesse público";
-  if (value === "low_relevance") return "baixa relevância";
-  if (value === "negative_public_interest") return "negativa";
-  if (value === "harmful_or_self_serving") return "auto-benefício";
-  return "neutra";
-}
-
-function stageLabel(stage: string) {
-  if (stage === "converted") return "transformada em norma";
-  if (stage === "advanced") return "com tramitação";
-  return "apresentada";
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("pt-BR").format(new Date(`${value}T12:00:00`));
 }
 
 function ProfileRankTrend({ change }: { change?: RankChange }) {
@@ -1147,8 +1038,4 @@ function SourceLink({ href, label }: { href: string; label: string }) {
       <ExternalLink className="size-4 shrink-0 text-muted-foreground" />
     </a>
   );
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("pt-BR").format(new Date(`${value}T12:00:00`));
 }

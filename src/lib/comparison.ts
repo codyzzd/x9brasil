@@ -101,9 +101,9 @@ export function buildComparisonCandidate(
               value: ranked.dimensions.participation,
             },
             {
-              key: "transparency",
-              label: "Transparência",
-              value: ranked.dimensions.transparency,
+              key: "campaignFinance",
+              label: "Finanças de campanha",
+              value: ranked.dimensions.campaignFinance,
             },
           ]
         : "production" in ranked.dimensions
@@ -124,9 +124,9 @@ export function buildComparisonCandidate(
                 value: ranked.dimensions.resources,
               },
               {
-                key: "transparency",
-                label: "Transparência",
-                value: ranked.dimensions.transparency,
+                key: "campaignFinance",
+                label: "Finanças de campanha",
+                value: ranked.dimensions.campaignFinance,
               },
             ]
           : [],

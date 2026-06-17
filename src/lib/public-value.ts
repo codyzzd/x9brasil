@@ -1,12 +1,9 @@
-import classificationJson from "@/data/public-value-classifications.json";
-import voteClassificationJson from "@/data/public-vote-classifications.json";
-
 export const PUBLIC_VALUE_WEIGHTS = {
-  contribution: 0.4,
-  publicVotes: 0.2,
-  efficiency: 0.2,
-  participation: 0.1,
-  transparency: 0.1,
+  contribution: 0.30,
+  publicVotes: 0.25,
+  efficiency: 0.20,
+  participation: 0.15,
+  campaignFinance: 0.10,
 } as const;
 
 export const PUBLIC_VALUE_CATEGORIES = {
@@ -30,6 +27,49 @@ export const PUBLIC_VALUE_CATEGORIES = {
 export type PublicValueCategory = keyof typeof PUBLIC_VALUE_CATEGORIES;
 export type ClassificationConfidence = "high" | "medium" | "low";
 export type ProposalStage = "presented" | "advanced" | "converted";
+
+export type ParticipationRole = "AUTHOR" | "COAUTHOR" | "REQUESTER" | "FISCALIZATION" | "SIGNATORY" | "UNKNOWN";
+export type ProposalNature = "SUBSTANTIVE" | "FISCALIZATION" | "PROCEDURAL" | "SYMBOLIC" | "UNKNOWN";
+
+export const ROLE_WEIGHTS = {
+  AUTHOR: 1.00,
+  COAUTHOR: 0.45,
+  REQUESTER: 0.60,
+  FISCALIZATION: 0.55,
+  SIGNATORY: 0.20,
+  UNKNOWN: 0.05,
+} as const;
+
+export const NATURE_WEIGHTS = {
+  SUBSTANTIVE: 1.00,
+  FISCALIZATION: 0.65,
+  PROCEDURAL: 0.25,
+  SYMBOLIC: 0.10,
+  UNKNOWN: 0.05,
+} as const;
+
+export const PROGRESS_BONUS = {
+  ADVANCED: 0.20,
+  BECAME_NORM: 0.50,
+} as const;
+
+export const PARTICIPATION_LABELS: Record<ParticipationRole, string> = {
+  AUTHOR: "Autoria principal",
+  COAUTHOR: "Coautoria",
+  REQUESTER: "Requerente",
+  FISCALIZATION: "Fiscalização",
+  SIGNATORY: "Signatário",
+  UNKNOWN: "Não identificado",
+};
+
+export const NATURE_LABELS: Record<ProposalNature, string> = {
+  SUBSTANTIVE: "Proposta substantiva",
+  FISCALIZATION: "Fiscalização",
+  PROCEDURAL: "Procedimental",
+  SYMBOLIC: "Simbólica",
+  UNKNOWN: "Não classificada",
+};
+
 export type PublicVoteClassification =
   | "positive_public_interest"
   | "neutral"
@@ -48,37 +88,8 @@ export type ProposalClassification = {
   methodologyVersion: string;
 };
 
-type ClassificationFile = {
-  version: number;
-  methodologyVersion: string;
-  reviewedAt: string;
-  classifications: Record<
-    string,
-    {
-      category: PublicValueCategory;
-      confidence: ClassificationConfidence;
-      justification: string;
-    }
-  >;
-};
-
-const classificationFile = classificationJson as ClassificationFile;
-
-type PublicVoteClassificationFile = {
-  version: number;
-  methodologyVersion: string;
-  reviewedAt: string;
-  classifications: Record<
-    string,
-    {
-      classification: PublicVoteClassification;
-      severity: PublicVoteSeverity;
-      publicInterestVote: PublicInterestVote;
-      confidence: number;
-      reason: string;
-    }
-  >;
-};
+export const METHODOLOGY_VERSION = "2026-06-15";
+export const METHODOLOGY_REVIEWED_AT = "2026-06-15";
 
 export type PublicVoteAnalysis = {
   voteId: string;
@@ -105,8 +116,7 @@ export type PublicVoteRecord = {
   reviewedManually: boolean;
 };
 
-const voteClassificationFile =
-  voteClassificationJson as PublicVoteClassificationFile;
+export const VOTE_METHODOLOGY_VERSION = "2026-06-15-votes";
 
 const rules: Array<{
   category: PublicValueCategory;
@@ -216,15 +226,6 @@ export function classifyProposal(
   proposalId: string,
   summary: string,
 ): ProposalClassification | null {
-  const reviewed = classificationFile.classifications[proposalId];
-  if (reviewed) {
-    return {
-      ...reviewed,
-      source: "reviewed",
-      methodologyVersion: classificationFile.methodologyVersion,
-    };
-  }
-
   const normalized = normalizeProposalText(summary);
   const matches = rules.filter((rule) =>
     rule.patterns.some((pattern) => pattern.test(normalized)),
@@ -236,7 +237,7 @@ export function classifyProposal(
     confidence: "high",
     justification: matches[0].justification,
     source: "rule",
-    methodologyVersion: classificationFile.methodologyVersion,
+    methodologyVersion: METHODOLOGY_VERSION,
   };
 }
 
@@ -256,10 +257,40 @@ export function proposalContributionPoints(
   );
 }
 
+export function getProposalWeight(params: {
+  categoryWeight: number;
+  stageMultiplier: number;
+  role: ParticipationRole;
+  nature: ProposalNature;
+  stage: ProposalStage;
+}) {
+  const basePoints = params.categoryWeight * params.stageMultiplier;
+  const roleWeight = ROLE_WEIGHTS[params.role];
+  const natureWeight = NATURE_WEIGHTS[params.nature];
+  const progressBonus =
+    params.stage === "converted"
+      ? PROGRESS_BONUS.BECAME_NORM
+      : params.stage === "advanced"
+        ? PROGRESS_BONUS.ADVANCED
+        : 0;
+
+  return basePoints * roleWeight * natureWeight + progressBonus;
+}
+
+export function formatScoreExplanation(params: {
+  role: ParticipationRole;
+  nature: ProposalNature;
+  stage: ProposalStage;
+}) {
+  const roleLabel = PARTICIPATION_LABELS[params.role];
+  const natureLabel = NATURE_LABELS[params.nature];
+  return `Papel: ${roleLabel} × ${natureLabel}`;
+}
+
 export function publicValueClassificationMetadata() {
   return {
-    methodologyVersion: classificationFile.methodologyVersion,
-    reviewedAt: classificationFile.reviewedAt,
+    methodologyVersion: METHODOLOGY_VERSION,
+    reviewedAt: METHODOLOGY_REVIEWED_AT,
   };
 }
 
@@ -268,17 +299,6 @@ export function classifyPublicVote(
   description: string,
   summary: string,
 ): PublicVoteAnalysis | null {
-  const reviewed = voteClassificationFile.classifications[voteId];
-  if (reviewed) {
-    return {
-      voteId,
-      ...reviewed,
-      source: "reviewed",
-      reviewedManually: true,
-      methodologyVersion: voteClassificationFile.methodologyVersion,
-    };
-  }
-
   const text = normalizeProposalText(`${description} ${summary}`);
   if (matchesAny(text, [/\bhomenagem\b/, /\bhomenageia\b/, /\bmedalha\b/, /\btitulo honorifico\b/, /\bdenomina\b/])) {
     return publicVoteRule(voteId, {
@@ -434,7 +454,7 @@ function publicVoteRule(
     ...analysis,
     source: "rule",
     reviewedManually: false,
-    methodologyVersion: voteClassificationFile.methodologyVersion,
+    methodologyVersion: VOTE_METHODOLOGY_VERSION,
   };
 }
 

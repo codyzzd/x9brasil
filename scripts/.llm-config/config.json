@@ -1,0 +1,17 @@
+{
+  "lastProvider": "lmstudio",
+  "lastModel": "llama-3.2-3b-instruct",
+  "lastMode": "advanced",
+  "providers": {
+    "openai": {
+      "baseUrl": "https://api.deepseek.com"
+    },
+    "ollama": {
+      "baseUrl": "http://localhost:11434"
+    },
+    "lmstudio": {
+      "baseUrl": "http://localhost:1234/v1"
+    }
+  },
+  "lastTarget": "votes"
+}

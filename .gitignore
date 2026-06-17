@@ -39,3 +39,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Data files (downloaded/generated)
+*.csv
+*.bin
+*.zip
+src/data/profile-details.json
+.llm-cache/
+**/.llm-cache/
+
+# Local agent/tooling state
+.opencode/
+opencode.json

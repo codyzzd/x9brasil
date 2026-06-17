@@ -5,22 +5,22 @@ import { SiteHeader } from "@/components/site-header";
 import { Badge } from "@/components/ui/badge";
 import { buildComparisonCandidate } from "@/lib/comparison";
 import {
+  getFullSnapshot,
+  getProfileDetails,
   getPeriodOptions,
-  rankingSnapshot,
-  resolvePeriod,
-} from "@/lib/data";
-import { getProfileDetails } from "@/lib/profile-data";
+  getSnapshotMetadata,
+} from "@/lib/db";
 import {
   calculatePublicValueRanking,
-  calculateRanking,
+  defaultRankingPeriod,
   materializePeriod,
-  type RankingIndex,
+  periodSelectOrder,
 } from "@/lib/ranking";
 
 export const metadata: Metadata = {
   title: "Comparar candidatos",
   description:
-    "Compare atividade legislativa, uso de recursos e dados públicos de dois deputados federais.",
+    "Compare atividade legislativa, uso de recursos e dados públicos de dois deputados federais no Score Brasil.",
 };
 
 export default async function ComparePage({
@@ -30,18 +30,16 @@ export default async function ComparePage({
     a?: string;
     b?: string;
     periodo?: string;
-    indice?: string;
   }>;
 }) {
   const context = await searchParams;
-  const period = resolvePeriod(context.periodo);
-  const index: RankingIndex =
-    context.indice === "valor-publico" ? "public-value" : "current";
-  const periodDeputies = materializePeriod(rankingSnapshot, period.id);
-  const ranked =
-    index === "public-value"
-      ? calculatePublicValueRanking(periodDeputies)
-      : calculateRanking(periodDeputies);
+  const snapshot = await getFullSnapshot();
+  const metadata = await getSnapshotMetadata();
+  const period = snapshot.periods.find(
+    (p) => p.id === (context.periodo || defaultRankingPeriod(snapshot).id),
+  ) || snapshot.periods[0];
+  const periodDeputies = materializePeriod(snapshot, period.id);
+  const ranked = calculatePublicValueRanking(periodDeputies);
   const bySlug = new Map(ranked.map((candidate) => [candidate.slug, candidate]));
   const rankedA = context.a ? bySlug.get(context.a) || null : null;
   const rankedB =
@@ -52,15 +50,15 @@ export default async function ComparePage({
   const candidateA = rankedA
     ? buildComparisonCandidate(
         rankedA,
-        index,
-        getProfileDetails(rankedA.id, period.id),
+        "public-value",
+        await getProfileDetails(rankedA.id, period.id),
       )
     : null;
   const candidateB = rankedB
     ? buildComparisonCandidate(
         rankedB,
-        index,
-        getProfileDetails(rankedB.id, period.id),
+        "public-value",
+        await getProfileDetails(rankedB.id, period.id),
       )
     : null;
 
@@ -68,7 +66,7 @@ export default async function ComparePage({
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
       <main className="flex-1">
-        <div className="mx-auto max-w-[1500px] px-4 py-8 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
           <div className="mb-7">
             <Badge variant="secondary">Dados públicos oficiais</Badge>
             <h1 className="mt-3 text-3xl font-bold tracking-tight text-balance sm:text-4xl">
@@ -91,13 +89,13 @@ export default async function ComparePage({
                 electionNumber: candidate.electionNumber,
               }))
               .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))}
-            periods={getPeriodOptions().map(({ id, label, partial }) => ({
+            periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label, partial }) => ({
               id,
               label,
               partial,
-            }))}
+            })))}
             period={period.id}
-            index={index}
+            index="public-value"
             selectedA={context.a || null}
             selectedB={context.b || null}
             candidateA={candidateA}
@@ -107,6 +105,7 @@ export default async function ComparePage({
               context.b && (!bySlug.has(context.b) || context.b === context.a),
             )}
           />
+
         </div>
       </main>
       <SiteFooter />

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { DataBanner } from "@/components/data-banner";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,11 +15,44 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "x9brasil",
-    template: "%s | x9brasil",
+    default: "Score Brasil",
+    template: "%s | Score Brasil",
   },
   description:
-    "Consulta de candidaturas e dados públicos oficiais do TSE e das casas legislativas.",
+    "Entenda o desempenho real dos políticos com dados, votos, gastos e impacto público.",
+  keywords: [
+    "Score Brasil",
+    "ranking políticos",
+    "desempenho deputados",
+    "atividade legislativa",
+    "gastos parlamentares",
+    "votos políticos",
+    "dados públicos",
+    "Câmara dos Deputados",
+    "TSE",
+    "transparência política",
+    "valor público",
+    "índice parlamentar",
+  ],
+  authors: [{ name: "Score Brasil" }],
+  openGraph: {
+    type: "website",
+    locale: "pt_BR",
+    siteName: "Score Brasil",
+    title: "Score Brasil",
+    description:
+      "Entenda o desempenho real dos políticos com dados, votos, gastos e impacto público.",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Score Brasil",
+    description:
+      "Entenda o desempenho real dos políticos com dados, votos, gastos e impacto público.",
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
 };
 
 export default function RootLayout({
@@ -33,7 +66,8 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <TooltipProvider>{children}</TooltipProvider>
+        <DataBanner />
+        {children}
       </body>
     </html>
   );

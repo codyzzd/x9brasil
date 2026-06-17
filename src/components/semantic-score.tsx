@@ -28,10 +28,6 @@ export function SemanticScore({
         className,
       )}
     >
-      <span
-        className={cn(compact ? "size-2" : "size-2.5", "rounded-full", style.dot)}
-        aria-hidden="true"
-      />
       <div className={cn("leading-none", compact ? "text-left" : "text-center")}>
         <p
           className={cn(

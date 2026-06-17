@@ -9,7 +9,22 @@ import {
   ArrowUpDown,
   Minus,
   SearchX,
+  Zap,
+  Flame,
+  UserCheck,
+  FileText,
+  Scale,
+  UserX,
+  TrendingDown,
+  FileMinus,
+  AlertTriangle,
+  FileQuestion,
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -32,10 +47,9 @@ import { labelTone } from "@/lib/label-tone";
 import { cn } from "@/lib/utils";
 import { DimensionScore } from "./dimension-score";
 import { SemanticScore } from "./semantic-score";
-import type {
-  RankingDirection,
-} from "./ranking-browser";
 import type { RankingOrder } from "./ranking-filters";
+
+type RankingDirection = "asc" | "desc";
 
 export function RankingTable({
   deputies,
@@ -89,7 +103,7 @@ export function RankingTable({
                 onOrderChange={onOrderChange}
               />
               <SortableHead
-                className="min-w-28"
+                className="min-w-24"
                 label="Participação"
                 value="participation"
                 order={order}
@@ -97,7 +111,7 @@ export function RankingTable({
                 onOrderChange={onOrderChange}
               />
               <SortableHead
-                className="min-w-28"
+                className="min-w-24"
                 label={index === "public-value" ? "Contribuição" : "Produção"}
                 value={index === "public-value" ? "contribution" : "production"}
                 order={order}
@@ -105,7 +119,7 @@ export function RankingTable({
                 onOrderChange={onOrderChange}
               />
               <SortableHead
-                className="min-w-28"
+                className="min-w-24"
                 label={index === "public-value" ? "Eficiência" : "Recursos"}
                 value={index === "public-value" ? "efficiency" : "resources"}
                 order={order}
@@ -114,7 +128,7 @@ export function RankingTable({
               />
               {index === "public-value" && (
                 <SortableHead
-                  className="min-w-28"
+                  className="min-w-24"
                   label="Votos públicos"
                   value="publicVotes"
                   order={order}
@@ -123,9 +137,9 @@ export function RankingTable({
                 />
               )}
               <SortableHead
-                className="min-w-28"
-                label="Transparência"
-                value="transparency"
+                className="min-w-24"
+                label="Finanças de campanha"
+                value="campaignFinance"
                 order={order}
                 direction={direction}
                 onOrderChange={onOrderChange}
@@ -152,11 +166,11 @@ export function RankingTable({
                   <RankTrend change={rankChanges.get(deputy.id)} compact />
                 </TableCell>
                 <TableCell>
-                  <DeputyIdentity deputy={deputy} />
+                  <DeputyIdentity deputy={deputy} compact />
                 </TableCell>
                 <TableCell>
                   <DimensionScore
-                    label={`${deputy.metrics.plenaryAttendances ?? "N/D"} sessões`}
+                    label={`${deputy.metrics.plenaryAttendances ?? "N/D"} sess.`}
                     value={deputy.dimensions.participation}
                     explanation={dimensionExplanation(
                       deputy,
@@ -172,7 +186,7 @@ export function RankingTable({
                     <DimensionScore
                       label={`${deputy.metrics.publicClassifiedProposals ?? 0}/${
                         deputy.metrics.publicTotalProposals ?? 0
-                      } classificadas`}
+                      } class.`}
                       value={publicDimension(deputy, "contribution")}
                       explanation={dimensionExplanation(
                         deputy,
@@ -184,7 +198,7 @@ export function RankingTable({
                     />
                   ) : (
                     <DimensionScore
-                      label={`${deputy.metrics.substantiveProposals ?? "N/D"} propostas`}
+                      label={`${deputy.metrics.substantiveProposals ?? "N/D"} prop.`}
                       value={currentDimension(deputy, "production")}
                       explanation={dimensionExplanation(
                         deputy,
@@ -198,7 +212,7 @@ export function RankingTable({
                 </TableCell>
                 <TableCell>
                   <DimensionScore
-                    label={formatCurrency(deputy.metrics.expensesTotal)}
+                    label={formatCurrencyCompact(deputy.metrics.expensesTotal)}
                     value={
                       index === "public-value"
                         ? publicDimension(deputy, "efficiency")
@@ -216,7 +230,7 @@ export function RankingTable({
                 {index === "public-value" && (
                   <TableCell>
                     <DimensionScore
-                      label={`${deputy.metrics.publicVotesAnalyzed ?? 0} analisados`}
+                      label={`${deputy.metrics.publicVotesAnalyzed ?? 0} anal.`}
                       value={publicDimension(deputy, "publicVotes")}
                       explanation={dimensionExplanation(
                         deputy,
@@ -230,12 +244,12 @@ export function RankingTable({
                 )}
                 <TableCell>
                   <DimensionScore
-                    label="dados oficiais"
-                    value={deputy.dimensions.transparency}
+                    label="oficial"
+                    value={deputy.dimensions.campaignFinance}
                     explanation={dimensionExplanation(
                       deputy,
                       index,
-                      "transparency",
+                      "campaignFinance",
                     )}
                     index={index}
                     compact
@@ -328,12 +342,12 @@ export function RankingTable({
                 />
               )}
               <DimensionScore
-                label="Transparência"
-                value={deputy.dimensions.transparency}
+                label="Finanças de campanha"
+                value={deputy.dimensions.campaignFinance}
                 explanation={dimensionExplanation(
                   deputy,
                   index,
-                  "transparency",
+                  "campaignFinance",
                 )}
                 index={index}
               />
@@ -449,8 +463,10 @@ function RankTrend({
 
 function DeputyIdentity({
   deputy,
+  compact = false,
 }: {
   deputy: RankedDeputy | PublicValueRankedDeputy;
+  compact?: boolean;
 }) {
   return (
     <div className="flex min-w-0 items-center gap-3">
@@ -470,15 +486,19 @@ function DeputyIdentity({
           {deputy.electionNumber ? ` · ${deputy.electionNumber}` : ""}
         </p>
         <div className="mt-1.5 flex flex-wrap gap-1">
-          {deputy.labels.slice(0, 2).map((label) => (
-            <Badge
-              key={label}
-              variant="outline"
-              className={cn("text-[10px]", labelStyle(label))}
-            >
-              {label}
-            </Badge>
-          ))}
+          {deputy.labels.slice(0, 2).map((label) => 
+            compact ? (
+              <CompactLabel key={label} label={label} />
+            ) : (
+              <Badge
+                key={label}
+                variant="outline"
+                className={cn("text-[10px]", labelStyle(label))}
+              >
+                {label}
+              </Badge>
+            )
+          )}
         </div>
       </div>
     </div>
@@ -517,4 +537,93 @@ function labelStyle(label: string) {
   }
 
   return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400";
+}
+
+function formatCurrencyCompact(value: number | null) {
+  if (value === null) return "N/D";
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+function CompactLabel({ label }: { label: string }) {
+  const { Icon, className } = getLabelConfig(label);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <div
+            className={cn(
+              "flex size-5 items-center justify-center rounded-full border text-[10px] cursor-default transition-colors",
+              className
+            )}
+            aria-label={label}
+          >
+            <Icon className="size-3" />
+          </div>
+        }
+      />
+      <TooltipContent className="px-2 py-1 text-xs font-medium" side="top">
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function getLabelConfig(label: string) {
+  const tone = labelTone(label);
+  
+  let colorClass = "";
+  if (tone === "positive") {
+    colorClass = "border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-950/50 dark:bg-emerald-950/20 dark:text-emerald-400";
+  } else if (tone === "negative") {
+    colorClass = "border-red-200 bg-red-50 text-red-600 dark:border-red-950/50 dark:bg-red-950/20 dark:text-red-400";
+  } else {
+    colorClass = "border-amber-200 bg-amber-50 text-amber-600 dark:border-amber-950/50 dark:bg-amber-950/20 dark:text-amber-400";
+  }
+
+  let IconComponent = AlertTriangle;
+  
+  switch (label) {
+    // Positivos
+    case "Eficiente":
+      IconComponent = Zap;
+      break;
+    case "Impacto alto":
+      IconComponent = Flame;
+      break;
+    case "Presente":
+    case "Participação alta":
+      IconComponent = UserCheck;
+      break;
+    case "Produção alta":
+      IconComponent = FileText;
+      break;
+    case "Uso de recursos equilibrado":
+      IconComponent = Scale;
+      break;
+      
+    // Negativos
+    case "Muitas ausências":
+    case "Participação abaixo da mediana":
+      IconComponent = UserX;
+      break;
+    case "Baixo retorno":
+      IconComponent = TrendingDown;
+      break;
+    case "Produção abaixo da mediana":
+      IconComponent = FileMinus;
+      break;
+    case "Gastos concentrados":
+      IconComponent = AlertTriangle;
+      break;
+    case "Dados incompletos":
+      IconComponent = FileQuestion;
+      break;
+  }
+
+  return { Icon: IconComponent, className: colorClass };
 }

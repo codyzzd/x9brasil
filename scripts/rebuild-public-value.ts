@@ -1,6 +1,9 @@
 import { readFile, writeFile } from "node:fs/promises";
 import {
+  NATURE_WEIGHTS,
+  PROGRESS_BONUS,
   PUBLIC_VALUE_CATEGORIES,
+  ROLE_WEIGHTS,
   classifyProposal,
   proposalContributionPoints,
   proposalStageMultiplier,
@@ -53,6 +56,15 @@ function enrichPeriod(period: ProfilePeriodDetails) {
         stageMultiplier: proposalStageMultiplier(stage),
         points: proposalPoints,
         methodologyVersion: classification.methodologyVersion,
+        roleWeight: 1,
+        natureWeight: 1,
+        progressBonus:
+          stage === "converted"
+            ? PROGRESS_BONUS.BECAME_NORM
+            : stage === "advanced"
+              ? PROGRESS_BONUS.ADVANCED
+              : 0,
+        scoreExplanation: "",
       },
     };
   });

@@ -50,35 +50,42 @@ const deputy = (
     supplierConcentration: 0.2,
     campaignCandidacyAvailable: true,
     assetsAvailable: true,
-    campaignReceiptsAvailable: true,
-    campaignExpensesAvailable: true,
-    accountsStatusAvailable: true,
+    totalVotes: 0,
+    totalCampaignReceipts: 100_000,
+    totalPublicReceipts: 50_000,
+    totalCampaignExpenses: 80_000,
+    topDonors: [],
+    topSuppliers: [],
     publicVotePositivePoints: id * 8,
     publicVoteNegativePenalties: id,
     publicVoteAbsencePenalties: 0,
     publicVotesAnalyzed: 3,
     publicVoteAverageConfidence: 0.8,
     publicVoteScore: id * 7,
+    authorProposals: id * 2,
+    coauthorProposals: id,
+    requesterProposals: id,
+    fiscalizationProposals: id,
     ...overrides,
   },
 });
 
-test("uses equal weights for all score dimensions", () => {
+test("uses conservative weights for all score dimensions", () => {
   assert.deepEqual(SCORE_WEIGHTS, {
-    participation: 0.25,
-    production: 0.25,
-    resources: 0.25,
-    transparency: 0.25,
+    participation: 0.30,
+    production: 0.30,
+    resources: 0.30,
+    campaignFinance: 0.10,
   });
 });
 
-test("public value index uses the experimental weights", () => {
+test("public value index uses conservative campaign finance weight", () => {
   assert.deepEqual(PUBLIC_VALUE_WEIGHTS, {
-    contribution: 0.4,
-    publicVotes: 0.2,
-    efficiency: 0.2,
-    participation: 0.1,
-    transparency: 0.1,
+    contribution: 0.30,
+    publicVotes: 0.25,
+    efficiency: 0.20,
+    participation: 0.15,
+    campaignFinance: 0.10,
   });
 });
 

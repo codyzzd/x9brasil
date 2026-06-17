@@ -1,10 +1,18 @@
 import { PUBLIC_VALUE_WEIGHTS } from "@/lib/public-value";
 
 export const SCORE_WEIGHTS = {
-  participation: 0.25,
-  production: 0.25,
-  resources: 0.25,
-  transparency: 0.25,
+  participation: 0.30,
+  production: 0.30,
+  resources: 0.30,
+  campaignFinance: 0.10,
+} as const;
+
+export const CAMPAIGN_FINANCE_INDICATOR_WEIGHTS = {
+  costPerVote: 0.35,
+  publicDependency: 0.25,
+  donorConcentration: 0.15,
+  supplierConcentration: 0.15,
+  patrimonyConsistency: 0.10,
 } as const;
 
 export type ScoreKey = keyof typeof SCORE_WEIGHTS;
@@ -18,14 +26,21 @@ export type RawMetrics = {
   oversightProposals: number | null;
   advancedProposals: number | null;
   convertedProposals: number | null;
+  authorProposals: number | null;
+  coauthorProposals: number | null;
+  requesterProposals: number | null;
+  fiscalizationProposals: number | null;
   expensesTotal: number | null;
   expenseDocuments: number | null;
   supplierConcentration: number | null;
   campaignCandidacyAvailable: boolean;
   assetsAvailable: boolean;
-  campaignReceiptsAvailable: boolean;
-  campaignExpensesAvailable: boolean;
-  accountsStatusAvailable: boolean;
+  totalVotes: number | null;
+  totalCampaignReceipts: number | null;
+  totalPublicReceipts: number | null;
+  totalCampaignExpenses: number | null;
+  topDonors: Array<{ name: string; value: number }>;
+  topSuppliers: Array<{ name: string; value: number }>;
   publicContributionPoints?: number | null;
   publicClassifiedProposals?: number;
   publicTotalProposals?: number;
@@ -108,6 +123,10 @@ export type ProfilePeriodDetails = {
     summary: string;
     status: string;
     url: string;
+    participationRole: string;
+    participationLabel: string;
+    proposalNature: string;
+    proposalNatureLabel: string;
     publicValue?: {
       category: string;
       categoryLabel: string;
@@ -119,6 +138,10 @@ export type ProfilePeriodDetails = {
       stageMultiplier: number;
       points: number;
       methodologyVersion: string;
+      roleWeight: number;
+      natureWeight: number;
+      progressBonus: number;
+      scoreExplanation: string;
     } | null;
   }>;
   publicVotes?: Array<{
@@ -185,7 +208,7 @@ export type ScoreDimensions = {
   participation: number | null;
   production: number | null;
   resources: number | null;
-  transparency: number;
+  campaignFinance: number | null;
 };
 
 export type RankedDeputy = DeputyRecord & {
@@ -201,7 +224,7 @@ export type PublicValueDimensions = {
   publicVotes: number | null;
   efficiency: number | null;
   participation: number | null;
-  transparency: number;
+  campaignFinance: number | null;
 };
 
 export type PublicValueRankedDeputy = DeputyRecord & {
@@ -236,6 +259,18 @@ export function defaultRankingPeriod(snapshot: RankingSnapshot) {
     snapshot.periods.find((period) => period.id === snapshot.defaultPeriod) ||
     snapshot.periods[0]
   );
+}
+
+export function periodSelectOrder<T extends { id: string }>(periods: T[]): T[] {
+  const legislature = periods.find((p) => p.id === "legislature");
+  const years = periods
+    .filter((p) => p.id !== "legislature")
+    .sort((a, b) => {
+      const na = Number(a.id);
+      const nb = Number(b.id);
+      return nb - na;
+    });
+  return legislature ? [legislature, ...years] : years;
 }
 
 export function materializePeriod(
@@ -378,14 +413,28 @@ export function percentileRanks(values: Array<number | null>): Array<number | nu
   return result;
 }
 
-export function transparencyScore(metrics: RawMetrics) {
-  return [
-    metrics.campaignCandidacyAvailable,
-    metrics.assetsAvailable,
-    metrics.campaignReceiptsAvailable,
-    metrics.campaignExpensesAvailable,
-    metrics.accountsStatusAvailable,
-  ].filter(Boolean).length * 20;
+export function campaignFinanceScore(metrics: RawMetrics, assetsTotal: number | null) {
+  const costPerVote =
+    metrics.totalCampaignExpenses != null && metrics.totalVotes != null && metrics.totalVotes > 0
+      ? metrics.totalCampaignExpenses / metrics.totalVotes
+      : null;
+  const publicDependency =
+    metrics.totalPublicReceipts != null && metrics.totalCampaignReceipts != null && metrics.totalCampaignReceipts > 0
+      ? metrics.totalPublicReceipts / metrics.totalCampaignReceipts
+      : null;
+  const donorConcentration = metrics.topDonors?.length > 0
+    ? metrics.topDonors.slice(0, 3).reduce((s, d) => s + d.value, 0) /
+      metrics.topDonors.reduce((s, d) => s + d.value, 0)
+    : null;
+  const supplierConcentration = metrics.topSuppliers?.length > 0
+    ? metrics.topSuppliers.slice(0, 3).reduce((s, d) => s + d.value, 0) /
+      metrics.topSuppliers.reduce((s, d) => s + d.value, 0)
+    : null;
+  const patrimonyConsistency =
+    !metrics.assetsAvailable ? null
+    : (assetsTotal === null || assetsTotal === 0) ? 20
+    : 75;
+  return { costPerVote, publicDependency, donorConcentration, supplierConcentration, patrimonyConsistency };
 }
 
 export function calculateRanking(deputies: DeputyRecord[]): RankedDeputy[] {
@@ -422,6 +471,28 @@ export function calculateRanking(deputies: DeputyRecord[]): RankedDeputy[] {
   const productionPercentiles = percentileRanks(productionRates);
   const expensePercentiles = percentileRanks(expenseRates);
 
+  const cfIndicators = deputies.map((deputy) =>
+    campaignFinanceScore(deputy.metrics, deputy.assetsTotal),
+  );
+  const costPerVoteInverted = cfIndicators.map((i) =>
+    i.costPerVote !== null ? 100 - i.costPerVote * 1000 : null,
+  );
+  const publicDependencyInverted = cfIndicators.map((i) =>
+    i.publicDependency !== null ? 100 - i.publicDependency * 100 : null,
+  );
+  const donorConcInverted = cfIndicators.map((i) =>
+    i.donorConcentration !== null ? 100 - i.donorConcentration * 100 : null,
+  );
+  const supplierConcInverted = cfIndicators.map((i) =>
+    i.supplierConcentration !== null ? 100 - i.supplierConcentration * 100 : null,
+  );
+
+  const costPerVotePercentiles = percentileRanks(costPerVoteInverted);
+  const publicDependencyPercentiles = percentileRanks(publicDependencyInverted);
+  const donorConcPercentiles = percentileRanks(donorConcInverted);
+  const supplierConcPercentiles = percentileRanks(supplierConcInverted);
+  const patrimonyConsistencyPercentiles = percentileRanks(cfIndicators.map((i) => i.patrimonyConsistency));
+
   const scored = deputies.map<RankedDeputy>((deputy, index) => {
     const attendance = attendancePercentiles[index];
     const votes = votePercentiles[index];
@@ -444,17 +515,58 @@ export function calculateRanking(deputies: DeputyRecord[]): RankedDeputy[] {
       expenseAlignment === null || concentrationScore === null
         ? null
         : expenseAlignment * 0.7 + concentrationScore * 0.3;
-    const transparency = transparencyScore(deputy.metrics);
+
+    let cfScoreSum = 0;
+    let cfWeightSum = 0;
+    const CF_W = CAMPAIGN_FINANCE_INDICATOR_WEIGHTS;
+    if (costPerVotePercentiles[index] !== null) {
+      cfScoreSum += costPerVotePercentiles[index]! * CF_W.costPerVote;
+      cfWeightSum += CF_W.costPerVote;
+    }
+    if (publicDependencyPercentiles[index] !== null) {
+      cfScoreSum += publicDependencyPercentiles[index]! * CF_W.publicDependency;
+      cfWeightSum += CF_W.publicDependency;
+    }
+    if (donorConcPercentiles[index] !== null) {
+      cfScoreSum += donorConcPercentiles[index]! * CF_W.donorConcentration;
+      cfWeightSum += CF_W.donorConcentration;
+    }
+    if (supplierConcPercentiles[index] !== null) {
+      cfScoreSum += supplierConcPercentiles[index]! * CF_W.supplierConcentration;
+      cfWeightSum += CF_W.supplierConcentration;
+    }
+    if (patrimonyConsistencyPercentiles[index] !== null) {
+      cfScoreSum += patrimonyConsistencyPercentiles[index]! * CF_W.patrimonyConsistency;
+      cfWeightSum += CF_W.patrimonyConsistency;
+    }
+    const campaignFinance = cfWeightSum > 0 ? cfScoreSum / cfWeightSum : null;
+
     const eligible =
       deputy.metrics.monthsInOffice >= 3 &&
       participation !== null &&
       production !== null &&
       resources !== null;
-    const score = eligible
-      ? participation * SCORE_WEIGHTS.participation +
-        production * SCORE_WEIGHTS.production +
-        resources * SCORE_WEIGHTS.resources +
-        transparency * SCORE_WEIGHTS.transparency
+
+    let scoreSum = 0;
+    let weightSum = 0;
+    if (participation !== null) {
+      scoreSum += participation * SCORE_WEIGHTS.participation;
+      weightSum += SCORE_WEIGHTS.participation;
+    }
+    if (production !== null) {
+      scoreSum += production * SCORE_WEIGHTS.production;
+      weightSum += SCORE_WEIGHTS.production;
+    }
+    if (resources !== null) {
+      scoreSum += resources * SCORE_WEIGHTS.resources;
+      weightSum += SCORE_WEIGHTS.resources;
+    }
+    if (campaignFinance !== null) {
+      scoreSum += campaignFinance * SCORE_WEIGHTS.campaignFinance;
+      weightSum += SCORE_WEIGHTS.campaignFinance;
+    }
+    const score = eligible && weightSum > 0
+      ? scoreSum / weightSum
       : null;
 
     return {
@@ -467,13 +579,14 @@ export function calculateRanking(deputies: DeputyRecord[]): RankedDeputy[] {
           participation === null ? null : Math.round(participation),
         production: production === null ? null : Math.round(production),
         resources: resources === null ? null : Math.round(resources),
-        transparency,
+        campaignFinance:
+          campaignFinance === null ? null : Math.round(campaignFinance),
       },
       labels: buildLabels({
         participation,
         production,
         resources,
-        transparency,
+        campaignFinance,
         concentration,
       }),
     };
@@ -541,6 +654,27 @@ export function calculatePublicValueRanking(
   const attendancePercentiles = percentileRanks(attendanceRates);
   const votePercentiles = percentileRanks(voteRates);
 
+  const cfIndicators = deputies.map((deputy) =>
+    campaignFinanceScore(deputy.metrics, deputy.assetsTotal),
+  );
+  const costPerVoteInverted = cfIndicators.map((i) =>
+    i.costPerVote !== null ? 100 - i.costPerVote * 1000 : null,
+  );
+  const publicDependencyInverted = cfIndicators.map((i) =>
+    i.publicDependency !== null ? 100 - i.publicDependency * 100 : null,
+  );
+  const donorConcInverted = cfIndicators.map((i) =>
+    i.donorConcentration !== null ? 100 - i.donorConcentration * 100 : null,
+  );
+  const supplierConcInverted = cfIndicators.map((i) =>
+    i.supplierConcentration !== null ? 100 - i.supplierConcentration * 100 : null,
+  );
+  const costPerVotePercentiles = percentileRanks(costPerVoteInverted);
+  const publicDependencyPercentiles = percentileRanks(publicDependencyInverted);
+  const donorConcPercentiles = percentileRanks(donorConcInverted);
+  const supplierConcPercentiles = percentileRanks(supplierConcInverted);
+  const patrimonyConsistencyPercentiles = percentileRanks(cfIndicators.map((i) => i.patrimonyConsistency));
+
   const scored = deputies.map<PublicValueRankedDeputy>((deputy, index) => {
     const contribution = contributionPercentiles[index];
     const efficiency = efficiencyPercentiles[index];
@@ -549,19 +683,63 @@ export function calculatePublicValueRanking(
     const votes = votePercentiles[index];
     const participation =
       attendance === null || votes === null ? null : (attendance + votes) / 2;
-    const transparency = transparencyScore(deputy.metrics);
+
+    let cfScoreSum = 0;
+    let cfWeightSum = 0;
+    const CF_W = CAMPAIGN_FINANCE_INDICATOR_WEIGHTS;
+    if (costPerVotePercentiles[index] !== null) {
+      cfScoreSum += costPerVotePercentiles[index]! * CF_W.costPerVote;
+      cfWeightSum += CF_W.costPerVote;
+    }
+    if (publicDependencyPercentiles[index] !== null) {
+      cfScoreSum += publicDependencyPercentiles[index]! * CF_W.publicDependency;
+      cfWeightSum += CF_W.publicDependency;
+    }
+    if (donorConcPercentiles[index] !== null) {
+      cfScoreSum += donorConcPercentiles[index]! * CF_W.donorConcentration;
+      cfWeightSum += CF_W.donorConcentration;
+    }
+    if (supplierConcPercentiles[index] !== null) {
+      cfScoreSum += supplierConcPercentiles[index]! * CF_W.supplierConcentration;
+      cfWeightSum += CF_W.supplierConcentration;
+    }
+    if (patrimonyConsistencyPercentiles[index] !== null) {
+      cfScoreSum += patrimonyConsistencyPercentiles[index]! * CF_W.patrimonyConsistency;
+      cfWeightSum += CF_W.patrimonyConsistency;
+    }
+    const campaignFinance = cfWeightSum > 0 ? cfScoreSum / cfWeightSum : null;
+
     const eligible =
       deputy.metrics.monthsInOffice >= 3 &&
       contribution !== null &&
       publicVotes !== null &&
       efficiency !== null &&
       participation !== null;
-    const score = eligible
-      ? contribution * PUBLIC_VALUE_WEIGHTS.contribution +
-        publicVotes * PUBLIC_VALUE_WEIGHTS.publicVotes +
-        efficiency * PUBLIC_VALUE_WEIGHTS.efficiency +
-        participation * PUBLIC_VALUE_WEIGHTS.participation +
-        transparency * PUBLIC_VALUE_WEIGHTS.transparency
+
+    let scoreSum = 0;
+    let weightSum = 0;
+    if (contribution !== null) {
+      scoreSum += contribution * PUBLIC_VALUE_WEIGHTS.contribution;
+      weightSum += PUBLIC_VALUE_WEIGHTS.contribution;
+    }
+    if (publicVotes !== null) {
+      scoreSum += publicVotes * PUBLIC_VALUE_WEIGHTS.publicVotes;
+      weightSum += PUBLIC_VALUE_WEIGHTS.publicVotes;
+    }
+    if (efficiency !== null) {
+      scoreSum += efficiency * PUBLIC_VALUE_WEIGHTS.efficiency;
+      weightSum += PUBLIC_VALUE_WEIGHTS.efficiency;
+    }
+    if (participation !== null) {
+      scoreSum += participation * PUBLIC_VALUE_WEIGHTS.participation;
+      weightSum += PUBLIC_VALUE_WEIGHTS.participation;
+    }
+    if (campaignFinance !== null) {
+      scoreSum += campaignFinance * PUBLIC_VALUE_WEIGHTS.campaignFinance;
+      weightSum += PUBLIC_VALUE_WEIGHTS.campaignFinance;
+    }
+    const score = eligible && weightSum > 0
+      ? scoreSum / weightSum
       : null;
 
     return {
@@ -575,13 +753,15 @@ export function calculatePublicValueRanking(
         efficiency: efficiency === null ? null : Math.round(efficiency),
         participation:
           participation === null ? null : Math.round(participation),
-        transparency,
+        campaignFinance:
+          campaignFinance === null ? null : Math.round(campaignFinance),
       },
       labels: buildPublicValueLabels({
         contribution,
         publicVotes,
         efficiency,
         participation,
+        campaignFinance,
         classified: deputy.metrics.publicClassifiedProposals || 0,
         total: deputy.metrics.publicTotalProposals || 0,
         analyzedVotes: deputy.metrics.publicVotesAnalyzed || 0,
@@ -613,6 +793,7 @@ function buildPublicValueLabels({
   publicVotes,
   efficiency,
   participation,
+  campaignFinance,
   classified,
   total,
   analyzedVotes,
@@ -621,6 +802,7 @@ function buildPublicValueLabels({
   publicVotes: number | null;
   efficiency: number | null;
   participation: number | null;
+  campaignFinance: number | null;
   classified: number;
   total: number;
   analyzedVotes: number;
@@ -635,6 +817,7 @@ function buildPublicValueLabels({
   if (contribution !== null && contribution <= 25) labels.push("Baixo retorno");
   if (total > 0 && classified / total < 0.5) labels.push("Classificação parcial");
   if (analyzedVotes === 0) labels.push("Votos sem análise");
+  if (campaignFinance === null) labels.push("Cobertura de dados insuficiente");
   return labels.slice(0, 3);
 }
 
@@ -642,13 +825,13 @@ function buildLabels({
   participation,
   production,
   resources,
-  transparency,
+  campaignFinance,
   concentration,
 }: {
   participation: number | null;
   production: number | null;
   resources: number | null;
-  transparency: number;
+  campaignFinance: number | null;
   concentration: number | null;
 }) {
   const labels: string[] = [];
@@ -662,7 +845,7 @@ function buildLabels({
   }
   if (resources !== null && resources >= 75) labels.push("Uso de recursos equilibrado");
   if (concentration !== null && concentration >= 0.5) labels.push("Gastos concentrados");
-  if (transparency < 60) labels.push("Dados incompletos");
+  if (campaignFinance === null) labels.push("Cobertura de dados insuficiente");
   return labels.slice(0, 3);
 }
 

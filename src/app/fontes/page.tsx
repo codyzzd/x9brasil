@@ -10,11 +10,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { rankingSnapshot } from "@/lib/data";
+import { getSnapshotMetadata } from "@/lib/db";
 
 export const metadata: Metadata = {
   title: "Fontes",
-  description: "Fontes públicas oficiais usadas pelo ranking.",
+  description: "Fontes públicas oficiais usadas pelo ranking do Score Brasil.",
 };
 
 const sources = [
@@ -44,7 +44,9 @@ const sources = [
   },
 ];
 
-export default function SourcesPage() {
+export default async function SourcesPage() {
+  const metadata = await getSnapshotMetadata();
+
   return (
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
@@ -61,8 +63,8 @@ export default function SourcesPage() {
             {new Intl.DateTimeFormat("pt-BR", {
               dateStyle: "long",
               timeStyle: "short",
-              timeZone: rankingSnapshot.timezone,
-            }).format(new Date(rankingSnapshot.generatedAt))}
+              timeZone: metadata.timezone,
+            }).format(new Date(metadata.generatedAt))}
             .
           </p>
 
@@ -96,12 +98,8 @@ export default function SourcesPage() {
               </CardTitle>
               <CardDescription>
                 Cobertura histórica de{" "}
-                {formatDate(rankingSnapshot.periods[0].start)} a{" "}
-                {formatDate(
-                  rankingSnapshot.periods.find(
-                    (period) => period.id === rankingSnapshot.defaultPeriod,
-                  )?.end || rankingSnapshot.periods[0].end,
-                )}
+                {formatDate(metadata.sources[0]?.updatedAt ?? "2023-02-01")} a{" "}
+                {formatDate(metadata.sources[metadata.sources.length - 1]?.updatedAt ?? "2026-06-01")}
                 .
               </CardDescription>
             </CardHeader>

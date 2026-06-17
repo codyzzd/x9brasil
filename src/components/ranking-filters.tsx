@@ -20,7 +20,7 @@ export type RankingOrder =
   | "contribution"
   | "publicVotes"
   | "efficiency"
-  | "transparency";
+  | "campaignFinance";
 
 export function RankingFilters({
   index,
@@ -34,7 +34,6 @@ export function RankingFilters({
   parties,
   onPeriodChange,
   onComparisonChange,
-  onIndexChange,
   onStateChange,
   onPartyChange,
   onOrderChange,
@@ -49,7 +48,6 @@ export function RankingFilters({
   periods: Array<{ id: string; label: string; partial: boolean; end: string }>;
   states: string[];
   parties: string[];
-  onIndexChange: (value: RankingIndex) => void;
   onPeriodChange: (value: string) => void;
   onComparisonChange: (value: RankingComparison) => void;
   onStateChange: (value: string) => void;
@@ -65,28 +63,6 @@ export function RankingFilters({
           <RotateCcw className="size-3.5" /> Limpar
         </Button>
       </div>
-      <FilterField label="Índice">
-        <Select
-          value={index}
-          onValueChange={(value) =>
-            onIndexChange((value ?? "current") as RankingIndex)
-          }
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue>
-              {index === "public-value"
-                ? "Valor Público (experimental)"
-                : "Índice atual"}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="current">Índice atual</SelectItem>
-            <SelectItem value="public-value">
-              Valor Público (experimental)
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      </FilterField>
       <FilterField label="Período">
         <Select
           value={period}
@@ -191,14 +167,12 @@ export function RankingFilters({
                 <SelectItem value="efficiency">Eficiência financeira</SelectItem>
               </>
             )}
-            <SelectItem value="transparency">Transparência</SelectItem>
+            <SelectItem value="campaignFinance">Finanças de campanha</SelectItem>
           </SelectContent>
         </Select>
       </FilterField>
       <div className="rounded-lg bg-muted p-4 text-xs leading-5 text-muted-foreground">
-        {index === "current"
-          ? "Estado e partido recalculam as posições dentro do grupo selecionado."
-          : "No índice experimental, posições e notas são nacionais; estado e partido apenas filtram a lista."}{" "}
+        Posições e notas são nacionais; estado e partido apenas filtram a lista.
         A busca por nome apenas localiza o parlamentar.
       </div>
     </div>
@@ -225,7 +199,7 @@ function orderLabel(order: RankingOrder, index: RankingIndex) {
     contribution: "Contribuição pública",
     publicVotes: "Votos públicos",
     efficiency: "Eficiência financeira",
-    transparency: "Transparência",
+    campaignFinance: "Finanças de campanha",
   }[order];
 }
 

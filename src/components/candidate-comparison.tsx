@@ -35,6 +35,7 @@ import {
 } from "@/lib/comparison";
 import { formatCurrency, type RankingIndex } from "@/lib/ranking";
 import { cn } from "@/lib/utils";
+import { CriteriaSpectrumComparison } from "@/components/criteria-spectrum-comparison";
 
 export type ComparisonOption = {
   slug: string;
@@ -99,7 +100,7 @@ export function CandidateComparison({
   return (
     <div className="space-y-6">
       <Card className="overflow-visible">
-        <CardContent className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_48px_minmax(0,1fr)_180px_220px] lg:items-end">
+        <CardContent           className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_48px_minmax(0,1fr)_180px] lg:items-end">
           <CandidatePicker
             key={`candidate-a-${selectedA || "empty"}-${period}`}
             label="Candidato A"
@@ -147,30 +148,6 @@ export function CandidateComparison({
                     {item.label}
                   </SelectItem>
                 ))}
-              </SelectContent>
-            </Select>
-          </ControlField>
-          <ControlField label="Índice">
-            <Select
-              value={index}
-              onValueChange={(value) =>
-                navigate({
-                  index: (value ?? "current") as RankingIndex,
-                })
-              }
-            >
-              <SelectTrigger className="h-10 w-full">
-                <SelectValue>
-                  {index === "public-value"
-                    ? "Valor Público"
-                    : "Índice atual"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="current">Índice atual</SelectItem>
-                <SelectItem value="public-value">
-                  Valor Público (experimental)
-                </SelectItem>
               </SelectContent>
             </Select>
           </ControlField>
@@ -478,34 +455,10 @@ function ComparisonSections({
 }) {
   return (
     <div className="space-y-5">
-      <ComparisonSection
-        title="Resultado do índice"
-        description="Cores representam a faixa de qualidade definida na metodologia."
-      >
-        {candidateA.dimensions.map((dimension, dimensionIndex) => (
-          <div
-            key={dimension.key}
-            className="grid gap-3 border-b py-4 first:pt-0 last:border-0 last:pb-0 md:grid-cols-[minmax(0,1fr)_150px_minmax(0,1fr)] md:items-center"
-          >
-            <DimensionScore
-              label={`${dimension.label} · ${candidateA.name}`}
-              value={dimension.value}
-              index={index}
-            />
-            <DifferenceLabel
-              left={dimension.value}
-              right={candidateB.dimensions[dimensionIndex]?.value ?? null}
-              format="points"
-            />
-            <DimensionScore
-              label={`${dimension.label} · ${candidateB.name}`}
-              value={candidateB.dimensions[dimensionIndex]?.value ?? null}
-              index={index}
-            />
-          </div>
-        ))}
-      </ComparisonSection>
-
+      <CriteriaSpectrumComparison
+        candidateA={candidateA}
+        candidateB={candidateB}
+      />
       <MetricSection
         title="Atividade parlamentar"
         description="Registros publicados pela Câmara no período selecionado."

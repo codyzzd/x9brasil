@@ -19,12 +19,19 @@ const metrics: RawMetrics = {
   supplierConcentration: 0.2,
   campaignCandidacyAvailable: true,
   assetsAvailable: true,
-  campaignReceiptsAvailable: false,
-  campaignExpensesAvailable: false,
-  accountsStatusAvailable: false,
-  publicContributionPoints: 20,
+    totalVotes: 0,
+    totalCampaignReceipts: null,
+    totalPublicReceipts: null,
+    totalCampaignExpenses: null,
+    topDonors: [],
+    topSuppliers: [],
+    publicContributionPoints: 20,
   publicClassifiedProposals: 5,
   publicTotalProposals: 18,
+  authorProposals: 8,
+  coauthorProposals: 3,
+  requesterProposals: 1,
+  fiscalizationProposals: 2,
 };
 
 const deputy = {
@@ -33,7 +40,7 @@ const deputy = {
     contribution: 96,
     efficiency: 95,
     participation: 98,
-    transparency: 40,
+    campaignFinance: 40,
   },
 } as PublicValueRankedDeputy;
 
@@ -51,13 +58,14 @@ test("efficiency explanation separates efficiency from participation", () => {
   assert.match(explanation.details[1], /Não usa presença ou votos/);
 });
 
-test("transparency explanation lists available and missing blocks", () => {
+test("campaignFinance explanation shows campaign finance indicators", () => {
   const explanation = dimensionExplanation(
     deputy,
     "public-value",
-    "transparency",
+    "campaignFinance",
   );
-  assert.match(explanation.details[0], /2\/5 disponíveis/);
-  assert.match(explanation.details[1], /Receitas eleitorais/);
-  assert.match(explanation.details[1], /Situação das contas/);
+  assert.match(explanation.details[0], /Custo por voto/);
+  assert.match(explanation.details[1], /Dependência de dinheiro público/);
+  assert.match(explanation.details[2], /Doadores declarados/);
+  assert.match(explanation.details[3], /Fornecedores declarados/);
 });

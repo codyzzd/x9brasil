@@ -37,7 +37,6 @@ export function DimensionScore({
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">{label}</span>
         <span className={cn("flex items-center gap-1.5 text-xs font-semibold tabular-nums", style.text)}>
-          <span className={cn("size-2 rounded-full", style.dot)} aria-hidden="true" />
           {value === null ? "N/D" : value}
           {!compact && value !== null && (
             <span className="font-medium">

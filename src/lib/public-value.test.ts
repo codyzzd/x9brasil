@@ -4,8 +4,12 @@ import {
   buildPublicVoteRecord,
   classifyPublicVote,
   classifyProposal,
+  getProposalWeight,
   proposalContributionPoints,
   publicVoteScoreDelta,
+  type ParticipationRole,
+  type ProposalNature,
+  type ProposalStage,
 } from "./public-value";
 
 test("classifies a single clear public-value theme", () => {
@@ -90,4 +94,81 @@ test("does not penalize low-confidence public vote analysis", () => {
     "yes",
   );
   assert.equal(record.scoreDelta, 0);
+});
+
+test("getProposalWeight: author+substantive presented = 2 (base)", () => {
+  const points = getProposalWeight({
+    categoryWeight: 2,
+    stageMultiplier: 1,
+    role: "AUTHOR" as ParticipationRole,
+    nature: "SUBSTANTIVE" as ProposalNature,
+    stage: "presented" as ProposalStage,
+  });
+  assert.equal(points, 2);
+});
+
+test("getProposalWeight: coauthor+substantive = 0.9 (2 × 1 × 0.45 × 1)", () => {
+  const points = getProposalWeight({
+    categoryWeight: 2,
+    stageMultiplier: 1,
+    role: "COAUTHOR" as ParticipationRole,
+    nature: "SUBSTANTIVE" as ProposalNature,
+    stage: "presented" as ProposalStage,
+  });
+  assert.equal(points, 0.9);
+});
+
+test("getProposalWeight: requester+fiscalization = 0.78 (2 × 1 × 0.60 × 0.65)", () => {
+  const points = getProposalWeight({
+    categoryWeight: 2,
+    stageMultiplier: 1,
+    role: "REQUESTER" as ParticipationRole,
+    nature: "FISCALIZATION" as ProposalNature,
+    stage: "presented" as ProposalStage,
+  });
+  assert.equal(points, 0.78);
+});
+
+test("getProposalWeight: symbolic nature = 0.2 (2 × 1 × 1 × 0.10)", () => {
+  const points = getProposalWeight({
+    categoryWeight: 2,
+    stageMultiplier: 1,
+    role: "AUTHOR" as ParticipationRole,
+    nature: "SYMBOLIC" as ProposalNature,
+    stage: "presented" as ProposalStage,
+  });
+  assert.equal(points, 0.2);
+});
+
+test("getProposalWeight: unknown role+nature = 0.005 (2 × 1 × 0.05 × 0.05)", () => {
+  const points = getProposalWeight({
+    categoryWeight: 2,
+    stageMultiplier: 1,
+    role: "UNKNOWN" as ParticipationRole,
+    nature: "UNKNOWN" as ProposalNature,
+    stage: "presented" as ProposalStage,
+  });
+  assert.ok(Math.abs(points - 0.005) < 1e-9);
+});
+
+test("getProposalWeight: author+substantive+converted = 7.7 (2 × 3.6 × 1 × 1 + 0.5)", () => {
+  const points = getProposalWeight({
+    categoryWeight: 2,
+    stageMultiplier: 3.6,
+    role: "AUTHOR" as ParticipationRole,
+    nature: "SUBSTANTIVE" as ProposalNature,
+    stage: "converted" as ProposalStage,
+  });
+  assert.equal(points, 7.7);
+});
+
+test("getProposalWeight: author+substantive+advanced = 2.2 (2 × 1 × 1 × 1 + 0.2)", () => {
+  const points = getProposalWeight({
+    categoryWeight: 2,
+    stageMultiplier: 1,
+    role: "AUTHOR" as ParticipationRole,
+    nature: "SUBSTANTIVE" as ProposalNature,
+    stage: "advanced" as ProposalStage,
+  });
+  assert.equal(points, 2.2);
 });

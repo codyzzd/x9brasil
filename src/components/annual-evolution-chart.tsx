@@ -11,7 +11,7 @@ export type AnnualEvolutionPoint = {
   participation: number | null;
   production: number | null;
   resources: number | null;
-  transparency: number | null;
+  campaignFinance: number | null;
 };
 
 type ScoreKey =
@@ -19,7 +19,7 @@ type ScoreKey =
   | "participation"
   | "production"
   | "resources"
-  | "transparency";
+  | "campaignFinance";
 
 type Series = {
   key: ScoreKey;
@@ -49,7 +49,7 @@ export function AnnualEvolutionChart({
     { key: "participation", label: "Participação", color: "#2563eb" },
     { key: "production", label: productionLabel, color: "#059669" },
     { key: "resources", label: resourcesLabel, color: "#d97706" },
-    { key: "transparency", label: "Transparência", color: "#db2777" },
+    { key: "campaignFinance", label: "Finanças de campanha", color: "#db2777" },
   ];
   const ranks = data.flatMap((point) =>
     point.rank === null ? [] : [point.rank],
@@ -408,6 +408,6 @@ function pointAriaLabel(
     `participação ${formatValue(point.participation)}`,
     `${productionLabel.toLowerCase()} ${formatValue(point.production)}`,
     `${resourcesLabel.toLowerCase()} ${formatValue(point.resources)}`,
-    `transparência ${formatValue(point.transparency)}`,
+    `finanças de campanha ${formatValue(point.campaignFinance)}`,
   ].join(", ");
 }

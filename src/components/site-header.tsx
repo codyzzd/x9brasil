@@ -23,12 +23,12 @@ export function SiteHeader() {
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-      <div className="mx-auto flex h-16 max-w-[1500px] items-center justify-between px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto flex h-16 w-full max-w-[1920px] items-center justify-between px-4">
         <Link href="/" className="flex min-h-10 items-center gap-2 font-semibold">
           <span className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <Search className="size-4" aria-hidden="true" />
           </span>
-          <span>x9brasil</span>
+          <span>Score Brasil</span>
         </Link>
 
         <nav className="hidden items-center gap-1 md:flex" aria-label="Principal">
@@ -58,7 +58,7 @@ export function SiteHeader() {
           </button>
           <SheetContent>
             <SheetHeader>
-              <SheetTitle>x9brasil</SheetTitle>
+              <SheetTitle>Score Brasil</SheetTitle>
             </SheetHeader>
             <nav className="flex flex-col gap-2 px-4">
               {links.map((link) => (
