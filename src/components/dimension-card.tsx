@@ -4,10 +4,10 @@ import { useState } from "react";
 import { ChevronDown, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import type {
   DimensionCardInfo,
   DimensionExplanation,
@@ -28,6 +28,7 @@ export function DimensionCard({
   cardInfo: DimensionCardInfo;
 }) {
   const [stepsOpen, setStepsOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const style = scoreStyle(value, "public-value");
   const labelText = value !== null ? publicValueScoreLabel(value) : null;
   const pct = value !== null ? value : null;
@@ -39,11 +40,20 @@ export function DimensionCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h3 className="text-lg font-semibold">{label}</h3>
-            <Tooltip>
-              <TooltipTrigger className="inline-flex items-center justify-center rounded-full hover:bg-muted transition-colors size-5">
-                <Info className="size-3.5 text-muted-foreground" />
-              </TooltipTrigger>
-              <TooltipContent side="top" className="max-w-80 text-xs leading-relaxed">
+            <Popover open={infoOpen} onOpenChange={setInfoOpen}>
+              <PopoverTrigger
+                render={
+                  <button
+                    type="button"
+                    className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    aria-label={`Entenda ${explanation.title}`}
+                    aria-expanded={infoOpen}
+                  >
+                    <Info className="size-3.5" />
+                  </button>
+                }
+              />
+              <PopoverContent side="top" align="start" className="max-w-80 text-xs leading-relaxed">
                 <p className="font-semibold mb-1">{explanation.title}</p>
                 <p className="text-muted-foreground">{explanation.description}</p>
                 {explanation.details.map((detail) => (
@@ -51,8 +61,8 @@ export function DimensionCard({
                     {detail}
                   </p>
                 ))}
-              </TooltipContent>
-            </Tooltip>
+              </PopoverContent>
+            </Popover>
           </div>
           {cardInfo.subtitle && (
             <p className="mt-0.5 text-sm text-muted-foreground">
@@ -91,7 +101,6 @@ export function DimensionCard({
           </div>
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>0%</span>
-            <span className={cn("font-medium tabular-nums", style.text)}>{pct}%</span>
             <span>100%</span>
           </div>
         </div>

@@ -62,15 +62,19 @@ function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
 export async function getPropositionId(voteId: string): Promise<number | null> {
   const url = `https://dadosabertos.camara.leg.br/api/v2/votacoes/${voteId}`;
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
-    const data: any = await res.json();
-    const objetos = data.dados?.objetosPossiveis;
+    const data = asRecord(await res.json());
+    const objetos = asRecord(data.dados).objetosPossiveis;
     if (!objetos || objetos.length === 0) return null;
-    return objetos[0].id as number;
+    return Number(asRecord(objetos[0]).id);
   } catch {
     return null;
   }
@@ -98,8 +102,8 @@ async function fetchFullText(proposicaoId: number): Promise<FullTextResult> {
   const propUrl = `https://dadosabertos.camara.leg.br/api/v2/proposicoes/${proposicaoId}`;
   const propRes = await fetch(propUrl);
   if (!propRes.ok) throw new Error(`Erro ao buscar proposição ${proposicaoId}: ${propRes.status}`);
-  const propData: any = await propRes.json();
-  const inteiroTeor = propData.dados?.urlInteiroTeor as string | undefined;
+  const propData = asRecord(await propRes.json());
+  const inteiroTeor = asRecord(propData.dados).urlInteiroTeor as string | undefined;
   if (!inteiroTeor) throw new Error(`Proposição ${proposicaoId} não possui urlInteiroTeor`);
 
   const headRes = await fetch(inteiroTeor, { method: "HEAD" });

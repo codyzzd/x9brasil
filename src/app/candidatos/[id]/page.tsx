@@ -6,14 +6,31 @@ import {
   ArrowLeft,
   ArrowDown,
   ArrowUp,
+  BadgeDollarSign,
+  BarChart3,
   BriefcaseBusiness,
   CalendarDays,
+  CalendarCheck2,
+  CheckCircle2,
+  ChevronDown,
+  CircleDollarSign,
   ExternalLink,
   FileCheck2,
+  FileStack,
   GitCompareArrows,
   GraduationCap,
   Hash,
+  Landmark,
   MapPin,
+  PieChart,
+  ReceiptText,
+  ShieldCheck,
+  TrendingUp,
+  UserMinus,
+  Users,
+  Vote,
+  WalletCards,
+  XCircle,
   type LucideIcon,
 } from "lucide-react";
 import { CandidatePeriodSelect } from "@/components/candidate-period-select";
@@ -60,6 +77,7 @@ import {
   type RankingIndex,
   type RawMetrics,
 } from "@/lib/ranking";
+import { PUBLIC_VALUE_DIMENSION_LABELS } from "@/lib/public-value";
 import { getSnapshotMetadata } from "@/lib/db";
 import { scoreStyle } from "@/lib/score-style";
 import { cn } from "@/lib/utils";
@@ -71,6 +89,7 @@ import {
   SuppliersTable,
   PublicVotesTable,
   VoteDistributionBar,
+  VotePositioningBar,
   AmendmentsTable,
   AssetsTable,
   CampaignDonorsTable,
@@ -301,31 +320,31 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
 
                 <div className="space-y-3">
                   <DimensionScore
-                    label="Contribuição pública"
-                    value={profileDimension(ranked, "contribution")}
-                    explanation={dimensionExplanation(ranked, index, "contribution")}
-                    index={index}
-                  />
-                  <DimensionScore
-                    label="Votos públicos"
-                    value={profileDimension(ranked, "publicVotes")}
-                    explanation={dimensionExplanation(ranked, index, "publicVotes")}
-                    index={index}
-                  />
-                  <DimensionScore
-                    label="Eficiência financeira"
-                    value={profileDimension(ranked, "efficiency")}
-                    explanation={dimensionExplanation(ranked, index, "efficiency")}
-                    index={index}
-                  />
-                  <DimensionScore
                     label="Participação"
                     value={ranked.dimensions.participation}
                     explanation={dimensionExplanation(ranked, index, "participation")}
                     index={index}
                   />
                   <DimensionScore
-                    label="Finanças de campanha"
+                    label={PUBLIC_VALUE_DIMENSION_LABELS.contribution}
+                    value={profileDimension(ranked, "contribution")}
+                    explanation={dimensionExplanation(ranked, index, "contribution")}
+                    index={index}
+                  />
+                  <DimensionScore
+                    label={PUBLIC_VALUE_DIMENSION_LABELS.publicVotes}
+                    value={profileDimension(ranked, "publicVotes")}
+                    explanation={dimensionExplanation(ranked, index, "publicVotes")}
+                    index={index}
+                  />
+                  <DimensionScore
+                    label={PUBLIC_VALUE_DIMENSION_LABELS.efficiency}
+                    value={profileDimension(ranked, "efficiency")}
+                    explanation={dimensionExplanation(ranked, index, "efficiency")}
+                    index={index}
+                  />
+                  <DimensionScore
+                    label={PUBLIC_VALUE_DIMENSION_LABELS.campaignFinance}
                     value={ranked.dimensions.campaignFinance}
                     explanation={dimensionExplanation(ranked, index, "campaignFinance")}
                     index={index}
@@ -359,19 +378,27 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
           </div>
 
           <div className="mt-6">
-            <Tabs defaultValue="contribuicao">
+            <Tabs defaultValue="participacao">
               <TabsList className="w-full max-w-full justify-start overflow-x-auto">
-                <TabsTrigger value="contribuicao">Contribuição pública</TabsTrigger>
-                <TabsTrigger value="votos-publicos">Votos públicos</TabsTrigger>
-                <TabsTrigger value="eficiencia">Eficiência financeira</TabsTrigger>
                 <TabsTrigger value="participacao">Participação</TabsTrigger>
-                <TabsTrigger value="financas-de-campanha">Finanças de campanha</TabsTrigger>
+                <TabsTrigger value="contribuicao">
+                  {PUBLIC_VALUE_DIMENSION_LABELS.contribution}
+                </TabsTrigger>
+                <TabsTrigger value="votos-publicos">
+                  {PUBLIC_VALUE_DIMENSION_LABELS.publicVotes}
+                </TabsTrigger>
+                <TabsTrigger value="eficiencia">
+                  {PUBLIC_VALUE_DIMENSION_LABELS.efficiency}
+                </TabsTrigger>
+                <TabsTrigger value="financas-de-campanha">
+                  {PUBLIC_VALUE_DIMENSION_LABELS.campaignFinance}
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="contribuicao" className="mt-5">
                 <div className="space-y-5">
                   <DimensionCard
-                    label="Contribuição pública"
+                    label={PUBLIC_VALUE_DIMENSION_LABELS.contribution}
                     value={ranked.dimensions.contribution}
                     explanation={dimensionExplanation(ranked, index, "contribution")}
                     cardInfo={getDimensionCardInfo(ranked.metrics, ranked.dimensions.contribution, "contribution")}
@@ -387,11 +414,15 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                       <ParticipationBar metrics={ranked.metrics} />
                       <div className="mt-6 grid gap-4 sm:grid-cols-2">
                         <MetricCard
+                          icon={TrendingUp}
+                          tone="emerald"
                           label="Propostas que avançaram"
                           value={ranked.metrics.advancedProposals}
                           detail="Mais de uma etapa de tramitação"
                         />
                         <MetricCard
+                          icon={FileCheck2}
+                          tone="sky"
                           label="Transformadas em norma"
                           value={ranked.metrics.convertedProposals}
                           detail="Resultado adicional, não atribuição exclusiva"
@@ -420,35 +451,46 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
               <TabsContent value="votos-publicos" className="mt-5">
                 <div className="space-y-5">
                   <DimensionCard
-                    label="Votos públicos"
+                    label={PUBLIC_VALUE_DIMENSION_LABELS.publicVotes}
                     value={ranked.dimensions.publicVotes}
                     explanation={dimensionExplanation(ranked, index, "publicVotes")}
                     cardInfo={getDimensionCardInfo(ranked.metrics, ranked.dimensions.publicVotes, "publicVotes")}
                   />
                   <Card>
                     <CardHeader>
-                      <CardTitle>Votos públicos analisados</CardTitle>
+                      <CardTitle>Votos analisados</CardTitle>
                       <CardDescription>
                         Bônus e penalidades ligados a votações nominais específicas, com regra conservadora e fonte oficial.
                       </CardDescription>
                     </CardHeader>
-                    <CardContent className="grid gap-4 sm:grid-cols-2">
+                    <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                      {periodDetails?.publicVotes?.length ? (
+                        <VotePositioningBar data={periodDetails.publicVotes} />
+                      ) : null}
                       <MetricCard
+                        icon={CheckCircle2}
+                        tone="emerald"
                         label="Pontos positivos"
                         value={formatDecimal(ranked.metrics.publicVotePositivePoints)}
                         detail="Votos alinhados a votações classificadas como interesse público"
                       />
                       <MetricCard
+                        icon={XCircle}
+                        tone="red"
                         label="Penalidades por voto"
                         value={formatDecimal(ranked.metrics.publicVoteNegativePenalties)}
                         detail="Votos contrários ao interesse público em votações classificadas"
                       />
                       <MetricCard
+                        icon={UserMinus}
+                        tone="slate"
                         label="Penalidades por ausência"
                         value={formatDecimal(ranked.metrics.publicVoteAbsencePenalties)}
                         detail="Aplicadas apenas em votações de relevância alta ou crítica"
                       />
                       <MetricCard
+                        icon={ShieldCheck}
+                        tone="sky"
                         label="Confiança média"
                         value={
                           ranked.metrics.publicVoteAverageConfidence === null ||
@@ -462,7 +504,7 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                   </Card>
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-lg">Votos públicos registrados</CardTitle>
+                      <CardTitle className="text-lg">Votos registrados</CardTitle>
                       <CardDescription>
                         Todas as votações nominais capturadas no período. Apenas as analisadas pela metodologia impactam o score.
                       </CardDescription>
@@ -486,7 +528,7 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
               <TabsContent value="eficiencia" className="mt-5">
                 <div className="space-y-5">
                   <DimensionCard
-                    label="Eficiência financeira"
+                    label={PUBLIC_VALUE_DIMENSION_LABELS.efficiency}
                     value={ranked.dimensions.efficiency}
                     explanation={dimensionExplanation(ranked, index, "efficiency")}
                     cardInfo={getDimensionCardInfo(ranked.metrics, ranked.dimensions.efficiency, "efficiency")}
@@ -500,16 +542,22 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                     </CardHeader>
                     <CardContent className="grid gap-4 sm:grid-cols-3">
                       <MetricCard
+                        icon={ReceiptText}
+                        tone="emerald"
                         label="Despesas líquidas"
                         value={formatCurrency(ranked.metrics.expensesTotal)}
                         detail="Total da CEAP no período"
                       />
                       <MetricCard
+                        icon={FileStack}
+                        tone="sky"
                         label="Documentos"
                         value={ranked.metrics.expenseDocuments}
                         detail="Registros de despesa publicados"
                       />
                       <MetricCard
+                        icon={PieChart}
+                        tone="amber"
                         label="Concentração"
                         value={
                           ranked.metrics.supplierConcentration === null
@@ -565,41 +613,43 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                       )}
                     </CardContent>
                   </Card>
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Emendas parlamentares</CardTitle>
-                      <CardDescription>
-                        Até 10 maiores registros do Transferegov associados ao nome do parlamentar.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="mb-5 grid gap-4 sm:grid-cols-2">
-                        <MetricCard
-                          label="Valor indicado nos registros"
-                          value={formatCurrency(
-                            (periodDetails?.amendments || []).reduce(
-                              (sum, item) => sum + item.proposedValue, 0,
-                            ),
-                          )}
-                          detail={`${periodDetails?.amendments.length || 0} registros exibidos`}
-                        />
-                        <MetricCard
-                          label="Repasse nos registros"
-                          value={formatCurrency(
-                            (periodDetails?.amendments || []).reduce(
-                              (sum, item) => sum + item.transferredValue, 0,
-                            ),
-                          )}
-                          detail="Valor informado no arquivo oficial"
-                        />
-                      </div>
-                      {periodDetails?.amendments.length ? (
-                        <AmendmentsTable data={periodDetails.amendments} />
-                      ) : (
-                        <EmptyData text="Nenhuma emenda individual vinculada no período." />
-                      )}
-                    </CardContent>
-                  </Card>
+                  <NonScoredInfoDisclosure>
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Emendas parlamentares</CardTitle>
+                        <CardDescription>
+                          Até 10 maiores registros do Transferegov associados ao nome do parlamentar.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="mb-5 grid gap-4 sm:grid-cols-2">
+                          <MetricCard
+                            label="Valor indicado nos registros"
+                            value={formatCurrency(
+                              (periodDetails?.amendments || []).reduce(
+                                (sum, item) => sum + item.proposedValue, 0,
+                              ),
+                            )}
+                            detail={`${periodDetails?.amendments.length || 0} registros exibidos`}
+                          />
+                          <MetricCard
+                            label="Repasse nos registros"
+                            value={formatCurrency(
+                              (periodDetails?.amendments || []).reduce(
+                                (sum, item) => sum + item.transferredValue, 0,
+                              ),
+                            )}
+                            detail="Valor informado no arquivo oficial"
+                          />
+                        </div>
+                        {periodDetails?.amendments.length ? (
+                          <AmendmentsTable data={periodDetails.amendments} />
+                        ) : (
+                          <EmptyData text="Nenhuma emenda individual vinculada no período." />
+                        )}
+                      </CardContent>
+                    </Card>
+                  </NonScoredInfoDisclosure>
                 </div>
               </TabsContent>
 
@@ -621,6 +671,8 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                     <CardContent>
                       <div className="grid gap-4 sm:grid-cols-2">
                         <MetricCard
+                          icon={CalendarCheck2}
+                          tone="emerald"
                           label="Sessões deliberativas"
                           {...participationMetricCard(
                             ranked.metrics.plenaryAttendances,
@@ -630,6 +682,8 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                           )}
                         />
                         <MetricCard
+                          icon={Vote}
+                          tone="sky"
                           label="Votos nominais"
                           {...participationMetricCard(
                             ranked.metrics.nominalVotes,
@@ -641,49 +695,51 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                       </div>
                     </CardContent>
                   </Card>
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Equipe do gabinete</CardTitle>
-                      <CardDescription>
-                        Retrato atual publicado pela Câmara; não muda com o ano selecionado.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="mb-4 text-3xl font-semibold tabular-nums">
-                        {identityDetails?.staff.length || 0}
-                        <span className="ml-2 text-sm font-normal text-muted-foreground">
-                          secretários parlamentares
-                        </span>
-                      </p>
-                      <div className="divide-y rounded-lg border">
-                        {identityDetails?.staff.length ? (
-                          identityDetails.staff.map((person) => (
-                            <div
-                              key={`${person.name}-${person.role}`}
-                              className="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between"
-                            >
-                              <p className="font-medium">{person.name}</p>
-                              <div className="text-xs text-muted-foreground sm:text-right">
-                                <p>{person.role}</p>
-                                {person.startDate && (
-                                  <p>Desde {formatDate(person.startDate)}</p>
-                                )}
+                  <NonScoredInfoDisclosure>
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Equipe do gabinete</CardTitle>
+                        <CardDescription>
+                          Retrato atual publicado pela Câmara; não muda com o ano selecionado.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="mb-4 text-3xl font-semibold tabular-nums">
+                          {identityDetails?.staff.length || 0}
+                          <span className="ml-2 text-sm font-normal text-muted-foreground">
+                            secretários parlamentares
+                          </span>
+                        </p>
+                        <div className="divide-y rounded-lg border">
+                          {identityDetails?.staff.length ? (
+                            identityDetails.staff.map((person) => (
+                              <div
+                                key={`${person.name}-${person.role}`}
+                                className="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between"
+                              >
+                                <p className="font-medium">{person.name}</p>
+                                <div className="text-xs text-muted-foreground sm:text-right">
+                                  <p>{person.role}</p>
+                                  {person.startDate && (
+                                    <p>Desde {formatDate(person.startDate)}</p>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          ))
-                        ) : (
-                          <EmptyData text="Equipe não disponível no arquivo atual." />
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
+                            ))
+                          ) : (
+                            <EmptyData text="Equipe não disponível no arquivo atual." />
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </NonScoredInfoDisclosure>
                 </div>
               </TabsContent>
 
               <TabsContent value="financas-de-campanha" className="mt-5">
                 <div className="space-y-5">
                   <DimensionCard
-                    label="Finanças de campanha"
+                    label={PUBLIC_VALUE_DIMENSION_LABELS.campaignFinance}
                     value={ranked.dimensions.campaignFinance}
                     explanation={dimensionExplanation(ranked, index, "campaignFinance")}
                     cardInfo={getDimensionCardInfo(ranked.metrics, ranked.dimensions.campaignFinance, "campaignFinance")}
@@ -691,6 +747,8 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
 
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     <MetricCard
+                      icon={CircleDollarSign}
+                      tone="emerald"
                       label="Custo por voto"
                       value={
                         ranked.metrics.totalCampaignExpenses !== null && ranked.metrics.totalVotes !== null && ranked.metrics.totalVotes > 0
@@ -704,6 +762,8 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                       }
                     />
                     <MetricCard
+                      icon={Landmark}
+                      tone="amber"
                       label="Dependência de dinheiro público"
                       value={
                         ranked.metrics.totalPublicReceipts !== null && ranked.metrics.totalCampaignReceipts !== null && ranked.metrics.totalCampaignReceipts > 0
@@ -717,6 +777,8 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                       }
                     />
                     <MetricCard
+                      icon={Users}
+                      tone="violet"
                       label="Concentração de receitas"
                       value={
                         ranked.metrics.topDonors?.length > 0
@@ -730,6 +792,8 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                       }
                     />
                     <MetricCard
+                      icon={BarChart3}
+                      tone="red"
                       label="Concentração de despesas"
                       value={
                         ranked.metrics.topSuppliers?.length > 0
@@ -743,11 +807,15 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                       }
                     />
                     <MetricCard
+                      icon={WalletCards}
+                      tone="sky"
                       label="Receita total"
                       value={formatCurrency(ranked.metrics.totalCampaignReceipts)}
                       detail={ranked.metrics.totalCampaignReceipts !== null ? "Receitas declaradas na campanha" : "Dados indisponíveis"}
                     />
                     <MetricCard
+                      icon={BadgeDollarSign}
+                      tone="slate"
                       label="Despesa total"
                       value={formatCurrency(ranked.metrics.totalCampaignExpenses)}
                       detail={ranked.metrics.totalCampaignExpenses !== null ? "Despesas declaradas na campanha" : "Dados indisponíveis"}
@@ -822,21 +890,23 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                       )}
                     </CardContent>
                   </Card>
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Rastreabilidade</CardTitle>
-                      <CardDescription>
-                        Confira os dados diretamente nas fontes oficiais.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <SourceLink href={ranked.chamberUrl} label="Perfil na API da Câmara" />
-                      <SourceLink href="https://dadosabertos.camara.leg.br/" label="Dados Abertos da Câmara" />
-                      <SourceLink href="https://dadosabertos.tse.jus.br/dataset/candidatos-2022" label="Candidaturas 2022 no TSE" />
-                      <SourceLink href="https://dadosabertos.camara.leg.br/arquivos/funcionarios/csv/funcionarios.csv" label="Quadro atual de funcionários da Câmara" />
-                      <SourceLink href="https://repositorio.dados.gov.br/seges/detru/siconv_emenda.csv.zip" label="Emendas parlamentares no Transferegov" />
-                    </CardContent>
-                  </Card>
+                  <NonScoredInfoDisclosure>
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Rastreabilidade</CardTitle>
+                        <CardDescription>
+                          Confira os dados diretamente nas fontes oficiais.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        <SourceLink href={ranked.chamberUrl} label="Perfil na API da Câmara" />
+                        <SourceLink href="https://dadosabertos.camara.leg.br/" label="Dados Abertos da Câmara" />
+                        <SourceLink href="https://dadosabertos.tse.jus.br/dataset/candidatos-2022" label="Candidaturas 2022 no TSE" />
+                        <SourceLink href="https://dadosabertos.camara.leg.br/arquivos/funcionarios/csv/funcionarios.csv" label="Quadro atual de funcionários da Câmara" />
+                        <SourceLink href="https://repositorio.dados.gov.br/seges/detru/siconv_emenda.csv.zip" label="Emendas parlamentares no Transferegov" />
+                      </CardContent>
+                    </Card>
+                  </NonScoredInfoDisclosure>
                 </div>
               </TabsContent>
             </Tabs>
@@ -869,6 +939,31 @@ function ProfileFact({
         </span>
       </span>
     </div>
+  );
+}
+
+function NonScoredInfoDisclosure({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="group">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-lg bg-muted/50 px-4 py-3 text-left transition-colors hover:bg-muted/70 [&::-webkit-details-marker]:hidden">
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-foreground">
+            Informações não contabilizadas no score
+          </span>
+          <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+            Dados oficiais exibidos para contexto e conferência, sem peso direto na nota desta aba.
+          </span>
+        </span>
+        <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="mt-3 space-y-5">
+        {children}
+      </div>
+    </details>
   );
 }
 
@@ -910,23 +1005,85 @@ function participationMetricCard(
 }
 
 function MetricCard({
+  icon: Icon,
+  tone = "slate",
   label,
   value,
   detail,
 }: {
+  icon?: LucideIcon;
+  tone?: "emerald" | "red" | "slate" | "sky" | "amber" | "violet";
   label: string;
   value: string | number | null;
   detail: string;
 }) {
+  const toneClass = metricToneClass(tone);
+
   return (
-    <div className="rounded-lg border p-4">
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums">
+    <div className={cn("rounded-lg border p-4", toneClass.card)}>
+      <div className="flex items-start justify-between gap-3">
+        <p className="min-w-0 text-sm text-muted-foreground">{label}</p>
+        {Icon ? (
+          <span
+            className={cn(
+              "flex size-9 shrink-0 items-center justify-center rounded-md",
+              toneClass.iconWrap,
+            )}
+            aria-hidden="true"
+          >
+            <Icon className={cn("size-4", toneClass.icon)} />
+          </span>
+        ) : null}
+      </div>
+      <p className="mt-2 text-2xl font-semibold leading-tight tabular-nums text-pretty">
         {value === null ? "Dados indisponíveis" : value}
       </p>
-      <p className="mt-2 text-xs text-muted-foreground">{detail}</p>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground text-pretty">{detail}</p>
     </div>
   );
+}
+
+function metricToneClass(tone: "emerald" | "red" | "slate" | "sky" | "amber" | "violet") {
+  if (tone === "emerald") {
+    return {
+      card: "border-emerald-200/80 bg-emerald-50/35 dark:border-emerald-900/70 dark:bg-emerald-950/15",
+      iconWrap: "bg-emerald-100 dark:bg-emerald-950/50",
+      icon: "text-emerald-700 dark:text-emerald-400",
+    };
+  }
+  if (tone === "red") {
+    return {
+      card: "border-red-200/80 bg-red-50/35 dark:border-red-900/70 dark:bg-red-950/15",
+      iconWrap: "bg-red-100 dark:bg-red-950/50",
+      icon: "text-red-700 dark:text-red-400",
+    };
+  }
+  if (tone === "sky") {
+    return {
+      card: "border-sky-200/80 bg-sky-50/35 dark:border-sky-900/70 dark:bg-sky-950/15",
+      iconWrap: "bg-sky-100 dark:bg-sky-950/50",
+      icon: "text-sky-700 dark:text-sky-400",
+    };
+  }
+  if (tone === "amber") {
+    return {
+      card: "border-amber-200/80 bg-amber-50/35 dark:border-amber-900/70 dark:bg-amber-950/15",
+      iconWrap: "bg-amber-100 dark:bg-amber-950/50",
+      icon: "text-amber-700 dark:text-amber-400",
+    };
+  }
+  if (tone === "violet") {
+    return {
+      card: "border-violet-200/80 bg-violet-50/35 dark:border-violet-900/70 dark:bg-violet-950/15",
+      iconWrap: "bg-violet-100 dark:bg-violet-950/50",
+      icon: "text-violet-700 dark:text-violet-400",
+    };
+  }
+  return {
+    card: "border-slate-200/80 bg-slate-50/35 dark:border-slate-800 dark:bg-slate-950/20",
+    iconWrap: "bg-slate-200 dark:bg-slate-900",
+    icon: "text-slate-800 dark:text-slate-300",
+  };
 }
 
 function formatInteger(value: number) {

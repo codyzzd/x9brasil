@@ -141,10 +141,10 @@ test("comparison preserves the public value ranking score and dimensions", () =>
   assert.deepEqual(
     comparison.dimensions.map(({ value }) => value),
     [
+      ranked.dimensions.participation,
       ranked.dimensions.contribution,
       ranked.dimensions.publicVotes,
       ranked.dimensions.efficiency,
-      ranked.dimensions.participation,
       ranked.dimensions.campaignFinance,
     ],
   );

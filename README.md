@@ -20,8 +20,8 @@ npm start
 
 ## Dados
 
-A aplicação lê dados diretamente do Supabase. Os snapshots JSON locais em
-`src/data/` foram removidos e não fazem parte do fluxo de runtime.
+A aplicação lê dados diretamente do Supabase. Classificações e métricas também
+são gravadas diretamente no Supabase.
 
 Para entender o caminho completo dos dados, da ingestão nas fontes públicas até
 o Supabase e os níveis de classificação, veja
@@ -42,6 +42,30 @@ Variáveis exigidas:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 
+### Classificação de valor público
+
+Use regex nível 1 para classificar casos óbvios diretamente no banco:
+
+```bash
+npm run data:regex
+```
+
+Use o wizard de IA para nível 2 ou 3:
+
+```bash
+npm run data:classify
+```
+
+O wizard permite escolher votações, proposições ou ambos; nível 2 com resumo ou
+nível 3 com inteiro teor; provedor/modelo; limite; e escopo de reprocessamento.
+Os resultados são gravados em `proposal_classifications`,
+`vote_classifications`, `legislator_votes` e `legislator_period_metrics`.
+
+Chaves opcionais para IA:
+
+- `OPENAI_API_KEY`
+- `GEMINI_API_KEY`
+
 ### Fontes
 
 Os dados vêm de APIs públicas:
@@ -54,11 +78,12 @@ Os dados vêm de APIs públicas:
 
 ### Sistema de Classificação de Valor Público
 
-Cada proposição é classificada em duas camadas:
+As classificações ficam em tabelas do Supabase e respeitam níveis:
 
-1. **Revisadas** (`public-value-classifications.json`) — Maior prioridade, inclui classificações manuais e de IA
-2. **Regras regex** (`classifyProposal()`) — Pattern matching para casos óbvios (homenagens, datas comemorativas, etc.)
-3. **Pendente** — Itens não classificados por nenhuma camada, candidatos para classificação por IA
+1. **Nível 3** — IA com inteiro teor.
+2. **Nível 2** — IA com resumo/descrição.
+3. **Nível 1** — Regras determinísticas para casos óbvios.
+4. **Pendente** — Itens ainda não classificados.
 
 ### Stack
 

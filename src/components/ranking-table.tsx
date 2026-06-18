@@ -39,6 +39,7 @@ import {
   type RankedDeputy,
   type RankingIndex,
 } from "@/lib/ranking";
+import { PUBLIC_VALUE_DIMENSION_LABELS } from "@/lib/public-value";
 import { dimensionExplanation } from "@/lib/dimension-explanations";
 import { labelTone } from "@/lib/label-tone";
 import { cn } from "@/lib/utils";
@@ -80,11 +81,11 @@ export function RankingTable({
   return (
     <>
       <div className="hidden overflow-hidden rounded-lg border lg:block">
-        <Table>
+        <Table className="table-fixed">
           <TableHeader>
             <TableRow>
               <SortableHead
-                className="w-16"
+                className="w-20"
                 label="#"
                 value="score"
                 order={order}
@@ -93,50 +94,9 @@ export function RankingTable({
                 centered
               />
               <SortableHead
+                className="w-[38%]"
                 label="Deputado"
                 value="name"
-                order={order}
-                direction={direction}
-                onOrderChange={onOrderChange}
-              />
-              <SortableHead
-                className="min-w-24"
-                label="Participação"
-                value="participation"
-                order={order}
-                direction={direction}
-                onOrderChange={onOrderChange}
-              />
-              <SortableHead
-                className="min-w-24"
-                label={index === "public-value" ? "Contribuição" : "Produção"}
-                value={index === "public-value" ? "contribution" : "production"}
-                order={order}
-                direction={direction}
-                onOrderChange={onOrderChange}
-              />
-              <SortableHead
-                className="min-w-24"
-                label={index === "public-value" ? "Eficiência" : "Recursos"}
-                value={index === "public-value" ? "efficiency" : "resources"}
-                order={order}
-                direction={direction}
-                onOrderChange={onOrderChange}
-              />
-              {index === "public-value" && (
-                <SortableHead
-                  className="min-w-24"
-                  label="Votos públicos"
-                  value="publicVotes"
-                  order={order}
-                  direction={direction}
-                  onOrderChange={onOrderChange}
-                />
-              )}
-              <SortableHead
-                className="min-w-24"
-                label="Finanças de campanha"
-                value="campaignFinance"
                 order={order}
                 direction={direction}
                 onOrderChange={onOrderChange}
@@ -150,6 +110,7 @@ export function RankingTable({
                 onOrderChange={onOrderChange}
                 centered
               />
+              <TableHead>Dimensões</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -168,101 +129,11 @@ export function RankingTable({
                     compact
                   />
                 </TableCell>
-                <TableCell>
-                  <DimensionScore
-                    label={`${deputy.metrics.plenaryAttendances ?? "N/D"} sess.`}
-                    value={deputy.dimensions.participation}
-                    explanation={dimensionExplanation(
-                      deputy,
-                      index,
-                      "participation",
-                    )}
-                    index={index}
-                    compact
-                    compactBar
-                  />
-                </TableCell>
-                <TableCell>
-                  {index === "public-value" ? (
-                    <DimensionScore
-                      label={`${deputy.metrics.publicClassifiedProposals ?? 0}/${
-                        deputy.metrics.publicTotalProposals ?? 0
-                      } class.`}
-                      value={publicDimension(deputy, "contribution")}
-                      explanation={dimensionExplanation(
-                        deputy,
-                        index,
-                        "contribution",
-                      )}
-                      index={index}
-                      compact
-                      compactBar
-                    />
-                  ) : (
-                    <DimensionScore
-                      label={`${deputy.metrics.substantiveProposals ?? "N/D"} prop.`}
-                      value={currentDimension(deputy, "production")}
-                      explanation={dimensionExplanation(
-                        deputy,
-                        index,
-                        "production",
-                      )}
-                      index={index}
-                      compact
-                      compactBar
-                    />
-                  )}
-                </TableCell>
-                <TableCell>
-                  <DimensionScore
-                    label={formatCurrencyCompact(deputy.metrics.expensesTotal)}
-                    value={
-                      index === "public-value"
-                        ? publicDimension(deputy, "efficiency")
-                        : currentDimension(deputy, "resources")
-                    }
-                    explanation={dimensionExplanation(
-                      deputy,
-                      index,
-                      index === "public-value" ? "efficiency" : "resources",
-                    )}
-                    index={index}
-                    compact
-                    compactBar
-                  />
-                </TableCell>
-                {index === "public-value" && (
-                  <TableCell>
-                    <DimensionScore
-                      label={`${deputy.metrics.publicVotesAnalyzed ?? 0} anal.`}
-                      value={publicDimension(deputy, "publicVotes")}
-                      explanation={dimensionExplanation(
-                        deputy,
-                        index,
-                        "publicVotes",
-                      )}
-                      index={index}
-                      compact
-                      compactBar
-                    />
-                  </TableCell>
-                )}
-                <TableCell>
-                  <DimensionScore
-                    label="oficial"
-                    value={deputy.dimensions.campaignFinance}
-                    explanation={dimensionExplanation(
-                      deputy,
-                      index,
-                      "campaignFinance",
-                    )}
-                    index={index}
-                    compact
-                    compactBar
-                  />
-                </TableCell>
                 <TableCell className="text-center">
                   <SemanticScore value={deputy.score} index={index} compact />
+                </TableCell>
+                <TableCell>
+                  <DimensionSummary deputy={deputy} index={index} />
                 </TableCell>
               </TableRow>
             ))}
@@ -291,83 +162,120 @@ export function RankingTable({
             <div className="mt-3 pl-11">
               <RankTrend change={rankChanges.get(deputy.id)} />
             </div>
-            <div
-              className={cn(
-                "mt-5 grid gap-3 max-[520px]:gap-2",
-                index === "public-value" ? "grid-cols-5" : "grid-cols-4",
-              )}
-            >
-              <DimensionScore
-                label="Participação"
-                value={deputy.dimensions.participation}
-                explanation={dimensionExplanation(
-                  deputy,
-                  index,
-                  "participation",
-                )}
-                index={index}
-                dense
-              />
-              <DimensionScore
-                label={index === "public-value" ? "Contribuição" : "Produção"}
-                value={
-                  index === "public-value"
-                    ? publicDimension(deputy, "contribution")
-                    : currentDimension(deputy, "production")
-                }
-                explanation={dimensionExplanation(
-                  deputy,
-                  index,
-                  index === "public-value" ? "contribution" : "production",
-                )}
-                index={index}
-                dense
-              />
-              <DimensionScore
-                label={index === "public-value" ? "Eficiência" : "Recursos"}
-                value={
-                  index === "public-value"
-                    ? publicDimension(deputy, "efficiency")
-                    : currentDimension(deputy, "resources")
-                }
-                explanation={dimensionExplanation(
-                  deputy,
-                  index,
-                  index === "public-value" ? "efficiency" : "resources",
-                )}
-                index={index}
-                dense
-              />
-              {index === "public-value" && (
-                <DimensionScore
-                  label="Votos públicos"
-                  value={publicDimension(deputy, "publicVotes")}
-                  explanation={dimensionExplanation(
-                    deputy,
-                    index,
-                    "publicVotes",
-                  )}
-                  index={index}
-                  dense
-                />
-              )}
-              <DimensionScore
-                label="Finanças de campanha"
-                value={deputy.dimensions.campaignFinance}
-                explanation={dimensionExplanation(
-                  deputy,
-                  index,
-                  "campaignFinance",
-                )}
-                index={index}
-                dense
-              />
-            </div>
+            <DimensionSummary deputy={deputy} index={index} className="mt-5" />
           </article>
         ))}
       </div>
     </>
   );
+}
+
+function DimensionSummary({
+  deputy,
+  index,
+  className,
+}: {
+  deputy: RankedDeputy | PublicValueRankedDeputy;
+  index: RankingIndex;
+  className?: string;
+}) {
+  const items = dimensionItems(deputy, index);
+  const weakest = Math.min(
+    ...items
+      .map((item) => item.value)
+      .filter((value): value is number => value !== null),
+  );
+  const hasWeakest = Number.isFinite(weakest);
+
+  return (
+    <div
+      className={cn(
+        "grid min-w-0 gap-2",
+        items.length === 5
+          ? "min-[560px]:grid-cols-5"
+          : "min-[560px]:grid-cols-4",
+        className,
+      )}
+    >
+      {items.map((item) => {
+        const weak = hasWeakest && item.value === weakest;
+
+        return (
+          <div
+            key={item.key}
+            className={cn(
+              "min-w-0 rounded-md px-2 py-1.5",
+              weak &&
+                "bg-amber-50 ring-1 ring-amber-200/70 dark:bg-amber-950/20 dark:ring-amber-900/40",
+            )}
+          >
+            <DimensionScore
+              label={item.label}
+              value={item.value}
+              explanation={item.explanation}
+              index={index}
+              compact
+              compactBar
+              showCompactLabel
+              compactValueAlign="right"
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function dimensionItems(
+  deputy: RankedDeputy | PublicValueRankedDeputy,
+  index: RankingIndex,
+) {
+  const productionKey =
+    index === "public-value" ? "contribution" : "production";
+  const resourcesKey = index === "public-value" ? "efficiency" : "resources";
+
+  return [
+    {
+      key: "participation",
+      label: "Part.",
+      value: deputy.dimensions.participation,
+      explanation: dimensionExplanation(deputy, index, "participation"),
+    },
+    {
+      key: productionKey,
+      label: "Prod.",
+      value:
+        index === "public-value"
+          ? publicDimension(deputy, "contribution")
+          : currentDimension(deputy, "production"),
+      explanation: dimensionExplanation(deputy, index, productionKey),
+    },
+    ...(index === "public-value"
+      ? [
+          {
+            key: "publicVotes" as const,
+            label: PUBLIC_VALUE_DIMENSION_LABELS.publicVotes,
+            value: publicDimension(deputy, "publicVotes"),
+            explanation: dimensionExplanation(deputy, index, "publicVotes"),
+          },
+        ]
+      : []),
+    {
+      key: resourcesKey,
+      label: index === "public-value" ? "Efic." : "Rec.",
+      value:
+        index === "public-value"
+          ? publicDimension(deputy, "efficiency")
+          : currentDimension(deputy, "resources"),
+      explanation: dimensionExplanation(deputy, index, resourcesKey),
+    },
+    {
+      key: "campaignFinance",
+      label: "Camp.",
+      value: deputy.dimensions.campaignFinance,
+      explanation: dimensionExplanation(deputy, index, "campaignFinance"),
+    },
+  ];
 }
 
 function SortableHead({
@@ -546,16 +454,6 @@ function labelStyle(label: string) {
   }
 
   return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400";
-}
-
-function formatCurrencyCompact(value: number | null) {
-  if (value === null) return "N/D";
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value);
 }
 
 function CompactLabel({ label }: { label: string }) {

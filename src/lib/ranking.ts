@@ -136,6 +136,7 @@ export type ProfilePeriodDetails = {
       confidence: string;
       justification: string;
       source: string;
+      analysisLevel: 1 | 2 | 3;
       stage: string;
       stageMultiplier: number;
       points: number;
@@ -159,6 +160,7 @@ export type ProfilePeriodDetails = {
     confidence: number | null;
     reason: string;
     source: string;
+    analysisLevel: 1 | 2 | 3 | null;
     reviewedManually: boolean;
   }>;
   amendments: Array<{

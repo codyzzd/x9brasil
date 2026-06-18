@@ -54,7 +54,7 @@ test("efficiency explanation separates efficiency from participation", () => {
     "public-value",
     "efficiency",
   );
-  assert.match(explanation.details[0], /10 pontos de contribuição/);
+  assert.match(explanation.details[0], /10 pontos de produção/);
   assert.match(explanation.details[1], /Não usa presença ou votos/);
 });
 

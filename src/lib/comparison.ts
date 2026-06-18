@@ -1,10 +1,15 @@
 import type {
   ProfileIdentityDetails,
   ProfilePeriodDetails,
+  PublicValueDimensions,
   PublicValueRankedDeputy,
   RankedDeputy,
   RankingIndex,
 } from "@/lib/ranking";
+import {
+  PUBLIC_VALUE_DIMENSION_LABELS,
+  PUBLIC_VALUE_DIMENSION_ORDER,
+} from "@/lib/public-value";
 
 export type ComparisonDifference = {
   absolute: number;
@@ -65,6 +70,10 @@ export function buildComparisonCandidate(
 ): ComparisonCandidate {
   const amendments = profile.period?.amendments || [];
   const months = ranked.metrics.monthsInOffice;
+  const publicValueDimensions =
+    index === "public-value" && "contribution" in ranked.dimensions
+      ? ranked.dimensions as PublicValueDimensions
+      : null;
 
   return {
     id: ranked.id,
@@ -78,34 +87,12 @@ export function buildComparisonCandidate(
     score: ranked.score,
     rank: ranked.rank,
     dimensions:
-      index === "public-value" && "contribution" in ranked.dimensions
-        ? [
-            {
-              key: "contribution",
-              label: "Contribuição pública",
-              value: ranked.dimensions.contribution,
-            },
-            {
-              key: "publicVotes",
-              label: "Votos públicos",
-              value: ranked.dimensions.publicVotes,
-            },
-            {
-              key: "efficiency",
-              label: "Eficiência financeira",
-              value: ranked.dimensions.efficiency,
-            },
-            {
-              key: "participation",
-              label: "Participação",
-              value: ranked.dimensions.participation,
-            },
-            {
-              key: "campaignFinance",
-              label: "Finanças de campanha",
-              value: ranked.dimensions.campaignFinance,
-            },
-          ]
+      publicValueDimensions
+        ? PUBLIC_VALUE_DIMENSION_ORDER.map((key) => ({
+            key,
+            label: PUBLIC_VALUE_DIMENSION_LABELS[key],
+            value: publicValueDimensions[key],
+          }))
         : "production" in ranked.dimensions
           ? [
               {
@@ -125,7 +112,7 @@ export function buildComparisonCandidate(
               },
               {
                 key: "campaignFinance",
-                label: "Finanças de campanha",
+                label: "Campanha",
                 value: ranked.dimensions.campaignFinance,
               },
             ]

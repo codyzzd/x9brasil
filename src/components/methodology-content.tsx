@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import {
   PUBLIC_VALUE_CATEGORIES,
+  PUBLIC_VALUE_DIMENSION_LABELS,
   PUBLIC_VALUE_WEIGHTS,
 } from "@/lib/public-value";
 import { getClassificationMetadata } from "@/lib/public-value-server";
@@ -71,14 +72,18 @@ function QuickFact({
   text: string;
 }) {
   return (
-    <div className="rounded-md bg-muted/60 p-3">
-      <p className="flex items-center gap-2 font-medium text-foreground">
-        <Icon className="size-4 text-blue-600 dark:text-blue-300" />
-        {title}
-      </p>
-      <p className="mt-1 text-xs leading-5 text-muted-foreground text-pretty">
-        {text}
-      </p>
+    <div className="min-h-36 rounded-md bg-muted/45 p-4 shadow-[inset_0_1px_0_rgb(255_255_255/0.45)] dark:shadow-none">
+      <span className="flex size-9 items-center justify-center rounded-md bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
+        <Icon className="size-4" />
+      </span>
+      <div className="mt-3 min-w-0">
+        <p className="text-base font-semibold leading-snug text-foreground">
+          {title}
+        </p>
+        <p className="mt-1.5 text-sm leading-6 text-muted-foreground text-pretty">
+          {text}
+        </p>
+      </div>
     </div>
   );
 }
@@ -162,23 +167,23 @@ function PublicValueSection({
 }) {
   return (
     <div className="mt-10 space-y-6">
-      <div className="rounded-lg border bg-card p-5 sm:p-6">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-          <div className="max-w-2xl">
+      <div className="rounded-lg border bg-card p-5 shadow-sm sm:p-6">
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(460px,0.82fr)] lg:items-start">
+          <div className="max-w-3xl">
             <p className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
               <Gauge className="size-3.5" /> Índice experimental
             </p>
-            <h2 className="mt-3 text-3xl font-bold text-balance">
+            <h2 className="mt-5 text-4xl font-bold leading-tight text-balance">
               Valor Público
             </h2>
-            <p className="mt-3 leading-7 text-muted-foreground text-pretty">
-              Mede contribuição pública em vez de só volume de atividade. A
+            <p className="mt-4 max-w-xl text-lg leading-8 text-muted-foreground text-pretty">
+              Mede produção em vez de só volume de atividade. A
               nota combina proposições, votos, eficiência, participação e
-              finanças de campanha em uma escala de 0 a 100.
+              campanha em uma escala de 0 a 100.
             </p>
           </div>
 
-          <div className="grid gap-2 text-sm sm:grid-cols-2 lg:w-[420px]">
+          <div className="grid gap-3 sm:grid-cols-2 lg:w-full">
             <QuickFact
               icon={Gauge}
               title="Nota de 0 a 100"
@@ -262,11 +267,11 @@ function PublicValueSection({
         </div>
         <div className="p-4">
           <pre className="overflow-x-auto rounded-lg bg-muted p-4 text-sm">
-            score = contribuição × {PUBLIC_VALUE_WEIGHTS.contribution * 100}%
-            {"\n"}      + votos públicos × {PUBLIC_VALUE_WEIGHTS.publicVotes * 100}%
+            score = participação × {PUBLIC_VALUE_WEIGHTS.participation * 100}%
+            {"\n"}      + produção × {PUBLIC_VALUE_WEIGHTS.contribution * 100}%
+            {"\n"}      + votos × {PUBLIC_VALUE_WEIGHTS.publicVotes * 100}%
             {"\n"}      + eficiência × {PUBLIC_VALUE_WEIGHTS.efficiency * 100}%
-            {"\n"}      + participação × {PUBLIC_VALUE_WEIGHTS.participation * 100}%
-            {"\n"}      + finanças de campanha × {PUBLIC_VALUE_WEIGHTS.campaignFinance * 100}%
+            {"\n"}      + campanha × {PUBLIC_VALUE_WEIGHTS.campaignFinance * 100}%
           </pre>
         </div>
       </div>
@@ -277,17 +282,17 @@ function PublicValueSection({
             <Calculator className="size-4" /> Composição do Valor Público
           </p>
           <p className="text-xs text-muted-foreground">
-            Contribuição temática tem o dobro do peso dos demais componentes.
+            Produção temática tem o dobro do peso dos demais componentes.
           </p>
         </div>
         <div className="p-4">
           <CompositionBar
             segments={[
-              { label: "Contribuição pública", weight: 0.30, color: "bg-blue-700" },
-              { label: "Votos públicos", weight: 0.25, color: "bg-blue-500" },
-              { label: "Eficiência financeira", weight: 0.20, color: "bg-blue-400" },
-              { label: "Participação", weight: 0.15, color: "bg-blue-300" },
-              { label: "Finanças de campanha", weight: 0.10, color: "bg-blue-200" },
+              { label: PUBLIC_VALUE_DIMENSION_LABELS.participation, weight: 0.15, color: "bg-blue-300" },
+              { label: PUBLIC_VALUE_DIMENSION_LABELS.contribution, weight: 0.30, color: "bg-blue-700" },
+              { label: PUBLIC_VALUE_DIMENSION_LABELS.publicVotes, weight: 0.25, color: "bg-blue-500" },
+              { label: PUBLIC_VALUE_DIMENSION_LABELS.efficiency, weight: 0.20, color: "bg-blue-400" },
+              { label: PUBLIC_VALUE_DIMENSION_LABELS.campaignFinance, weight: 0.10, color: "bg-blue-200" },
             ]}
           />
         </div>
@@ -296,7 +301,24 @@ function PublicValueSection({
       <div className="rounded-lg border bg-card">
         <div className="border-b px-4 py-3">
           <p className="flex items-center gap-2 font-semibold">
-            <Star className="size-4 text-muted-foreground" /> 1. Contribuição pública —{" "}
+            <Users className="size-4 text-muted-foreground" /> 1. Participação —{" "}
+            {PUBLIC_VALUE_WEIGHTS.participation * 100}%
+          </p>
+        </div>
+        <div className="space-y-3 p-4 text-sm leading-6 text-muted-foreground">
+          <p>
+            Usa o mesmo cálculo do Índice atual: média dos percentis nacionais
+            de presenças em sessões e votos nominais por mês em exercício. A
+            diferença é que os percentis são calculados nacionalmente (todo o
+            parlamento) e não dentro da coorte filtrada.
+          </p>
+        </div>
+      </div>
+
+      <div className="rounded-lg border bg-card">
+        <div className="border-b px-4 py-3">
+          <p className="flex items-center gap-2 font-semibold">
+            <Star className="size-4 text-muted-foreground" /> 2. Produção —{" "}
             {PUBLIC_VALUE_WEIGHTS.contribution * 100}%
           </p>
         </div>
@@ -334,7 +356,7 @@ function PublicValueSection({
                 <li>18,5 ÷ 12 meses = 1,54 pontos/mês</li>
                 <li>
                   Se 1,54 pontos/mês está no percentil 82 nacional, a nota de
-                  contribuição é <strong>82</strong>.
+                  produção é <strong>82</strong>.
                 </li>
               </ul>
             </div>
@@ -345,7 +367,7 @@ function PublicValueSection({
       <div className="rounded-lg border bg-card">
         <div className="border-b px-4 py-3">
           <p className="flex items-center gap-2 font-semibold">
-            <ThumbsUp className="size-4 text-muted-foreground" /> 2. Votos públicos —{" "}
+            <ThumbsUp className="size-4 text-muted-foreground" /> 3. Votos —{" "}
             {PUBLIC_VALUE_WEIGHTS.publicVotes * 100}%
           </p>
         </div>
@@ -385,7 +407,7 @@ function PublicValueSection({
                   <br />
                   classificação &quot;low_relevance&quot; → 0 pontos
                 </li>
-                <li>Pontuação total de votos públicos: +1 ponto</li>
+                <li>Pontuação total de votos: +1 ponto</li>
                 <li>
                   Esse total vira um percentil nacional. Se for percentil 54,
                   a nota é <strong>54</strong>.
@@ -399,17 +421,17 @@ function PublicValueSection({
       <div className="rounded-lg border bg-card">
         <div className="border-b px-4 py-3">
           <p className="flex items-center gap-2 font-semibold">
-            <Zap className="size-4 text-muted-foreground" /> 3. Eficiência financeira —{" "}
+            <Zap className="size-4 text-muted-foreground" /> 4. Finanças —{" "}
             {PUBLIC_VALUE_WEIGHTS.efficiency * 100}%
           </p>
         </div>
         <div className="space-y-3 p-4 text-sm leading-6 text-muted-foreground">
           <p>
-            Dividimos os pontos de contribuição pela despesa total da cota
+            Dividimos os pontos de produção pela despesa total da cota
             parlamentar e multiplicamos por R$ 100 mil. O resultado representa
-            quantos pontos de contribuição o deputado gerou para cada R$ 100
+            quantos pontos de produção o deputado gerou para cada R$ 100
             mil gastos. Esse valor vira um percentil nacional. Gastar mais não
-            reduz a nota por si só — o que importa é se a contribuição
+            reduz a nota por si só — o que importa é se a produção
             acompanhou o gasto.
           </p>
           <details>
@@ -443,24 +465,7 @@ function PublicValueSection({
       <div className="rounded-lg border bg-card">
         <div className="border-b px-4 py-3">
           <p className="flex items-center gap-2 font-semibold">
-            <Users className="size-4 text-muted-foreground" /> 4. Participação —{" "}
-            {PUBLIC_VALUE_WEIGHTS.participation * 100}%
-          </p>
-        </div>
-        <div className="space-y-3 p-4 text-sm leading-6 text-muted-foreground">
-          <p>
-            Usa o mesmo cálculo do Índice atual: média dos percentis nacionais
-            de presenças em sessões e votos nominais por mês em exercício. A
-            diferença é que os percentis são calculados nacionalmente (todo o
-            parlamento) e não dentro da coorte filtrada.
-          </p>
-        </div>
-      </div>
-
-      <div className="rounded-lg border bg-card">
-        <div className="border-b px-4 py-3">
-          <p className="flex items-center gap-2 font-semibold">
-            <Banknote className="size-4 text-muted-foreground" /> 5. Finanças de campanha —{" "}
+            <Banknote className="size-4 text-muted-foreground" /> 5. Campanha —{" "}
             {PUBLIC_VALUE_WEIGHTS.campaignFinance * 100}%
           </p>
         </div>
@@ -501,11 +506,11 @@ function PublicValueSection({
             <div className="mt-2 rounded-lg bg-muted p-3 text-xs leading-5">
               <p className="font-medium text-foreground">Notas obtidas</p>
               <ul className="mt-1 list-disc pl-4 space-y-1">
-                <li>Contribuição: 82</li>
-                <li>Votos públicos: 54</li>
-                <li>Eficiência: 68</li>
                 <li>Participação: 55</li>
-                <li>Finanças de campanha: 72</li>
+                <li>Produção: 82</li>
+                <li>Votos: 54</li>
+                <li>Eficiência: 68</li>
+                <li>Campanha: 72</li>
               </ul>
               <p className="mt-2 font-medium text-foreground">Fórmula</p>
               <p className="mt-1">

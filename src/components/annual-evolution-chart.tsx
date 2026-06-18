@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { PUBLIC_VALUE_DIMENSION_LABELS } from "@/lib/public-value";
 import { cn } from "@/lib/utils";
 
 export type AnnualEvolutionPoint = {
@@ -49,7 +50,7 @@ export function AnnualEvolutionChart({
     { key: "participation", label: "Participação", color: "#2563eb" },
     { key: "production", label: productionLabel, color: "#059669" },
     { key: "resources", label: resourcesLabel, color: "#d97706" },
-    { key: "campaignFinance", label: "Finanças de campanha", color: "#db2777" },
+    { key: "campaignFinance", label: "Campanha", color: "#db2777" },
   ];
   const ranks = data.flatMap((point) =>
     point.rank === null ? [] : [point.rank],
@@ -408,6 +409,6 @@ function pointAriaLabel(
     `participação ${formatValue(point.participation)}`,
     `${productionLabel.toLowerCase()} ${formatValue(point.production)}`,
     `${resourcesLabel.toLowerCase()} ${formatValue(point.resources)}`,
-    `finanças de campanha ${formatValue(point.campaignFinance)}`,
+    `${PUBLIC_VALUE_DIMENSION_LABELS.campaignFinance.toLocaleLowerCase("pt-BR")} ${formatValue(point.campaignFinance)}`,
   ].join(", ");
 }

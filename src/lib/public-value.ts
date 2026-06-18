@@ -1,10 +1,31 @@
 export const PUBLIC_VALUE_WEIGHTS = {
+  participation: 0.15,
   contribution: 0.30,
   publicVotes: 0.25,
   efficiency: 0.20,
-  participation: 0.15,
   campaignFinance: 0.10,
 } as const;
+
+export type PublicValueDimensionKey = keyof typeof PUBLIC_VALUE_WEIGHTS;
+
+export const PUBLIC_VALUE_DIMENSION_ORDER = [
+  "participation",
+  "contribution",
+  "publicVotes",
+  "efficiency",
+  "campaignFinance",
+] as const satisfies readonly PublicValueDimensionKey[];
+
+export const PUBLIC_VALUE_DIMENSION_LABELS: Record<
+  PublicValueDimensionKey,
+  string
+> = {
+  participation: "Participação",
+  contribution: "Produção",
+  publicVotes: "Votos",
+  efficiency: "Finanças",
+  campaignFinance: "Campanha",
+};
 
 export const PUBLIC_VALUE_CATEGORIES = {
   anti_corruption: { label: "Combate à corrupção", weight: 10 },

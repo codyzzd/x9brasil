@@ -117,10 +117,20 @@ async function updateMetricRows(rows: Row[]) {
 
 async function fetchByIds<T extends Row>(table: string, ids: string[], select = "*", column = "id") {
   const rows: T[] = [];
+  const orderColumn = table === "proposal_classifications" ? "proposal_id" : "id";
   for (const batch of chunks(ids)) {
-    const { data, error } = await supabase.from(table).select(select).in(column, batch);
-    if (error) throw new Error(`Failed to read ${table}: ${error.message}`);
-    rows.push(...((data ?? []) as T[]));
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const to = from + PAGE_SIZE - 1;
+      const { data, error } = await supabase
+        .from(table)
+        .select(select)
+        .in(column, batch)
+        .order(orderColumn)
+        .range(from, to);
+      if (error) throw new Error(`Failed to read ${table}: ${error.message}`);
+      rows.push(...((data ?? []) as T[]));
+      if (!data || data.length < PAGE_SIZE) break;
+    }
   }
   return rows;
 }

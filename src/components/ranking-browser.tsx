@@ -6,11 +6,10 @@ import { Filter, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   calculatePublicValueRanking,
   calculateRankChanges,
@@ -197,45 +196,26 @@ export function RankingBrowser({
     />
   );
 
-  const filterToolbar = (
-    <RankingFilters
-      index={index}
-      period={period}
-      comparison={comparison}
-      state={state}
-      party={party}
-      order={order}
-      periods={filterPeriods}
-      states={states}
-      parties={parties}
-      onPeriodChange={(value) => {
-        setPeriod(value);
-        setState("all");
-        setParty("all");
-        setVisible(PAGE_SIZE);
-      }}
-      onComparisonChange={setComparison}
-      onStateChange={(value) => {
-        setState(value);
-        setVisible(PAGE_SIZE);
-      }}
-      onPartyChange={(value) => {
-        setParty(value);
-        setVisible(PAGE_SIZE);
-      }}
-      onOrderChange={(value) => {
-        setOrder(value);
-        setDirection(value === "name" ? "asc" : "desc");
-        setVisible(PAGE_SIZE);
-      }}
-      onReset={reset}
-      layout="toolbar"
-    />
-  );
-
   return (
     <div className="min-w-0 space-y-5">
-      <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Summary label="Deputados no grupo" value={periodDeputies.length} />
+        <Summary label="Com posição" value={eligible.length} />
+        <Summary
+          label="Score médio"
+          value={average ?? "N/D"}
+          suffix="/100"
+          score={average}
+        />
+        <Summary
+          label="Atualizado em"
+          value={new Intl.DateTimeFormat("pt-BR").format(
+            new Date(`${periodDefinition.end}T12:00:00`),
+          )}
+        />
+      </div>
+
+      <div className="space-y-3 rounded-lg border bg-card p-3 shadow-xs">
         <div className="flex gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -250,46 +230,27 @@ export function RankingBrowser({
               aria-label="Buscar deputado"
             />
           </div>
-          <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
-            <Button
-              variant="outline"
-              className="h-10 md:hidden"
-              onClick={() => setFiltersOpen(true)}
-            >
-              <Filter className="size-4" /> Filtros
-            </Button>
-            <SheetContent side="left">
-              <SheetHeader>
-                <SheetTitle>Filtrar ranking</SheetTitle>
-              </SheetHeader>
-              <div className="px-4">{filters}</div>
-            </SheetContent>
-          </Sheet>
+          <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
+            <PopoverTrigger
+              render={
+                <Button variant="outline" className="h-10">
+                  <Filter className="size-4" /> Filtros
+                </Button>
+              }
+            />
+            <PopoverContent align="end" className="w-[calc(100vw-2rem)] sm:w-96">
+              {filters}
+            </PopoverContent>
+          </Popover>
         </div>
 
-        <div className="hidden md:block">
-          {filterToolbar}
-        </div>
+        <p className="rounded-md bg-muted/60 px-3 py-2 text-xs leading-5 text-muted-foreground">
+          Posições e notas são nacionais; estado e partido apenas filtram a lista.
+          A busca por nome apenas localiza o parlamentar.
+        </p>
       </div>
 
       <div className="min-w-0">
-        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Summary label="Deputados no grupo" value={periodDeputies.length} />
-          <Summary label="Com posição" value={eligible.length} />
-          <Summary
-            label="Score médio"
-            value={average ?? "N/D"}
-            suffix="/100"
-            score={average}
-          />
-          <Summary
-            label="Atualizado em"
-            value={new Intl.DateTimeFormat("pt-BR").format(
-              new Date(`${periodDefinition.end}T12:00:00`),
-            )}
-          />
-        </div>
-
         <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
           <div>
             <h2 className="text-xl font-semibold">

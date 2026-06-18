@@ -1,7 +1,14 @@
 "use client"
 
 import { useState } from "react"
-import { ExternalLink } from "lucide-react"
+import {
+  BadgeCheck,
+  Brain,
+  ExternalLink,
+  FileSearch,
+  ListChecks,
+  Sparkles,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { buttonVariants } from "@/components/ui/button"
@@ -34,7 +41,7 @@ function publicVoteClassificationLabel(value: string) {
   if (value === "analyzed") return "analisado"
   if (value === "positive_public_interest") return "interesse público"
   if (value === "low_relevance") return "baixa relevância"
-  if (value === "negative_public_interest") return "negativa"
+  if (value === "negative_public_interest") return "contra interesse público"
   if (value === "harmful_or_self_serving") return "auto-benefício"
   return "neutra"
 }
@@ -60,6 +67,30 @@ function candidateVoteLabel(value: string) {
   if (value === "no") return "não"
   if (value === "absent") return "ausente"
   return "abstenção"
+}
+
+function inferredAnalysisLevel(source: string, analysisLevel: 1 | 2 | 3 | null | undefined) {
+  if (analysisLevel === 1 || analysisLevel === 2 || analysisLevel === 3) return analysisLevel
+  if (source === "rule") return 1
+  if (source === "llm") return 2
+  return null
+}
+
+function analysisMethod(source: string, analysisLevel: 1 | 2 | 3 | null | undefined, reviewedManually: boolean) {
+  if (reviewedManually || source === "reviewed") {
+    return { label: "Revisado manualmente", Icon: BadgeCheck }
+  }
+  const level = inferredAnalysisLevel(source, analysisLevel)
+  if (level === 1) return { label: "Nível 1 · regra automática", Icon: ListChecks }
+  if (level === 2) return { label: "Nível 2 · IA com resumo", Icon: Sparkles }
+  if (level === 3) return { label: "Nível 3 · IA com inteiro teor", Icon: Brain }
+  return { label: "Não analisado", Icon: FileSearch }
+}
+
+function justificationTitle(source: string, analysisLevel: 1 | 2 | 3 | null | undefined, reviewedManually: boolean) {
+  if (reviewedManually || source === "reviewed") return "Justificativa da revisão"
+  const level = inferredAnalysisLevel(source, analysisLevel)
+  return level && level > 1 ? "Justificativa da IA" : "Justificativa da regra"
 }
 
 const CLASSIFICATION_STYLES: Record<string, string> = {
@@ -105,7 +136,7 @@ const VOTE_BAR_SEGMENTS: {
   },
   {
     key: "negative_public_interest",
-    label: "Negativa",
+    label: "Contra interesse público",
     barClass: "bg-amber-500 dark:bg-amber-400",
     dotClass: "bg-amber-500 dark:bg-amber-400",
   },
@@ -117,18 +148,111 @@ const VOTE_BAR_SEGMENTS: {
   },
 ]
 
+const VOTE_POSITIONING_SEGMENTS: {
+  key: "aligned" | "opposed" | "absence" | "unanalyzed"
+  label: string
+  barClass: string
+  dotClass: string
+}[] = [
+  {
+    key: "aligned",
+    label: "Alinhado",
+    barClass: "bg-emerald-500 dark:bg-emerald-400",
+    dotClass: "bg-emerald-500 dark:bg-emerald-400",
+  },
+  {
+    key: "opposed",
+    label: "Contrário",
+    barClass: "bg-red-500 dark:bg-red-400",
+    dotClass: "bg-red-500 dark:bg-red-400",
+  },
+  {
+    key: "absence",
+    label: "Ausência/abstenção",
+    barClass: "bg-gray-400 dark:bg-gray-500",
+    dotClass: "bg-gray-400 dark:bg-gray-500",
+  },
+  {
+    key: "unanalyzed",
+    label: "Não analisado",
+    barClass: "bg-slate-300 dark:bg-slate-600",
+    dotClass: "bg-slate-300 dark:bg-slate-600",
+  },
+]
+
 /* ───── types ───── */
 
 type ExpenseCategory = { name: string; total: number; documents: number }
 type Supplier = { name: string; taxId: string | null; total: number; documents: number }
 type LargestExpense = { category: string; supplier: string; date: string; value: number; documentUrl: string | null }
-type PublicVote = { voteId: string; date: string; description: string; summary: string; url: string; candidateVote: string; classification: string; severity: string; scoreDelta: number; confidence: number | null; reason: string; source: string; reviewedManually: boolean }
+type PublicVote = { voteId: string; date: string; description: string; summary: string; url: string; candidateVote: string; classification: string; severity: string; scoreDelta: number; confidence: number | null; reason: string; source: string; analysisLevel: 1 | 2 | 3 | null; reviewedManually: boolean }
 type Amendment = { number: string; year: string; type: string; beneficiary: string; proposedValue: number; transferredValue: number }
 type Asset = { type: string; description: string; value: number }
 type CampaignDonor = { name: string; value: number }
 type CampaignSupplier = { name: string; value: number }
 
 /* ───── tables ───── */
+
+function votePositioningKey(vote: PublicVote): "aligned" | "opposed" | "absence" | "unanalyzed" {
+  if (vote.classification === "unanalyzed") return "unanalyzed"
+  if (vote.candidateVote === "absent" || vote.candidateVote === "abstain") return "absence"
+
+  const positiveOrNeutral =
+    vote.classification === "positive_public_interest" ||
+    vote.classification === "neutral"
+  const negativeOrHarmful =
+    vote.classification === "negative_public_interest" ||
+    vote.classification === "harmful_or_self_serving"
+
+  if (
+    (positiveOrNeutral && vote.candidateVote === "yes") ||
+    (negativeOrHarmful && vote.candidateVote === "no")
+  ) {
+    return "aligned"
+  }
+
+  return "opposed"
+}
+
+export function VotePositioningBar({ data }: { data: PublicVote[] }) {
+  const segments = VOTE_POSITIONING_SEGMENTS.map((s) => ({
+    ...s,
+    count: data.filter((vote) => votePositioningKey(vote) === s.key).length,
+  }))
+  const total = segments.reduce((sum, s) => sum + s.count, 0)
+
+  if (total === 0) return null
+
+  return (
+    <div className="space-y-4 sm:col-span-2 lg:col-span-4">
+      <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
+        {segments.map((s) => {
+          const pct = (s.count / total) * 100
+          if (pct < 0.5) return null
+          return (
+            <div
+              key={s.key}
+              className={cn(s.barClass, "transition-[width] duration-500")}
+              style={{ width: `${pct}%` }}
+              title={`${s.label}: ${s.count} (${Math.round(pct)}%)`}
+            />
+          )
+        })}
+      </div>
+      <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-xs">
+        {segments.map((s) =>
+          s.count > 0 ? (
+            <span key={s.key} className="inline-flex items-center gap-1.5">
+              <span className={cn("size-2.5 rounded-full", s.dotClass)} />
+              <span className="tabular-nums font-medium">{s.count}</span>
+              <span className="text-muted-foreground">{s.label}</span>
+            </span>
+          ) : null,
+        )}
+      </div>
+    </div>
+  )
+}
 
 export function VoteDistributionBar({ data }: { data: PublicVote[] }) {
   const segments = VOTE_BAR_SEGMENTS.map((s) => ({
@@ -193,8 +317,9 @@ function VoteDetailSheet({
       ? vote.candidateVote === "yes"
       : vote.candidateVote === "no"
   const points = severityPoints(vote.severity)
-  const methodLabel =
-    !analyzed ? "Não analisada" : vote.source === "reviewed" ? "Revisão manual" : "Regra automática"
+  const method = analysisMethod(vote.source, vote.analysisLevel, vote.reviewedManually)
+  const MethodIcon = method.Icon
+  const reasonTitle = justificationTitle(vote.source, vote.analysisLevel, vote.reviewedManually)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -213,38 +338,31 @@ function VoteDetailSheet({
         <div className="flex-1 space-y-5 p-4 pt-5">
           <section>
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-              Descrição
+              Dados oficiais
             </h4>
             <p className="text-sm leading-relaxed text-foreground">
               {vote.description}
             </p>
-          </section>
-
-          {vote.summary && (
-            <section>
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                Resumo
-              </h4>
+            {vote.summary && (
               <p className="text-sm leading-relaxed text-muted-foreground">
                 {vote.summary}
               </p>
-            </section>
-          )}
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                Data
-              </h4>
-              <p className="text-sm">{formatDate(vote.date)}</p>
-            </div>
-            <div>
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                Voto do parlamentar
-              </h4>
-              <p className="text-sm font-medium">{candidateVoteLabel(vote.candidateVote)}</p>
-            </div>
-          </div>
+            )}
+            <dl className="mt-4 grid grid-cols-2 gap-4">
+              <div>
+                <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  Data
+                </dt>
+                <dd className="text-sm">{formatDate(vote.date)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  Voto do parlamentar
+                </dt>
+                <dd className="text-sm font-medium">{candidateVoteLabel(vote.candidateVote)}</dd>
+              </div>
+            </dl>
+          </section>
 
           <section>
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
@@ -266,13 +384,24 @@ function VoteDetailSheet({
               {vote.reviewedManually && (
                 <Badge variant="outline" className="text-[11px]">Revisado manualmente</Badge>
               )}
+              <Badge variant="outline" className="inline-flex items-center gap-1 text-[11px]">
+                <MethodIcon className="size-3" />
+                {method.label}
+              </Badge>
             </div>
+            {analyzed && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Confiança:{" "}
+                {vote.confidence === null ? "dados indisponíveis" : `${formatDecimal(vote.confidence * 100)}%`}
+              </p>
+            )}
           </section>
 
           <section>
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-              Justificativa
+              Saiba por quê
             </h4>
+            <p className="text-xs font-medium text-muted-foreground">{reasonTitle}</p>
             <p className="text-sm leading-relaxed text-muted-foreground">
               {vote.reason || "Esta votação ainda não foi classificada pela metodologia de valor público."}
             </p>
@@ -280,10 +409,17 @@ function VoteDetailSheet({
 
           <section>
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-              Impacto no score
+              Impacto
             </h4>
             <div className="space-y-1">
-              <p className="text-lg font-semibold tabular-nums">
+              <p className={cn(
+                "text-lg font-semibold tabular-nums",
+                vote.scoreDelta < 0
+                  ? "text-red-700 dark:text-red-400"
+                  : vote.scoreDelta > 0
+                    ? "text-emerald-700 dark:text-emerald-400"
+                    : "text-muted-foreground",
+              )}>
                 {vote.scoreDelta > 0 ? "+" : ""}{formatDecimal(vote.scoreDelta)} pts
               </p>
               <ul className="space-y-0.5 text-xs text-muted-foreground">
@@ -300,15 +436,11 @@ function VoteDetailSheet({
                     {vote.severity && vote.candidateVote !== "absent" && vote.candidateVote !== "abstain" && (
                       <li>Voto {aligned ? "alinhado" : "contrário"} ao interesse público</li>
                     )}
-                    <li>
-                      Confiança da classificação:{" "}
-                      {vote.confidence === null ? "Dados indisponíveis" : `${formatDecimal(vote.confidence * 100)}%`}
-                    </li>
                   </>
                 ) : (
                   <li>Esta votação ainda não entrou no cálculo do score.</li>
                 )}
-                <li>Metodologia: {methodLabel}</li>
+                <li>Método: {method.label}</li>
               </ul>
             </div>
           </section>
@@ -418,7 +550,7 @@ export function PublicVotesTable({ data }: { data: PublicVote[] }) {
       options: [
         { value: "positive_public_interest", label: "Interesse público" },
         { value: "low_relevance", label: "Baixa relevância" },
-        { value: "negative_public_interest", label: "Negativa" },
+        { value: "negative_public_interest", label: "Contra interesse público" },
         { value: "harmful_or_self_serving", label: "Auto-benefício" },
         { value: "neutral", label: "Neutra" },
         { value: "analyzed", label: "Analisada" },
@@ -475,7 +607,7 @@ export function PublicVotesTable({ data }: { data: PublicVote[] }) {
             onClick={() => openSheet(vote)}
             className="mt-0.5 text-[11px] font-medium text-muted-foreground/60 transition-colors hover:text-foreground"
           >
-            Ver detalhes da votação
+            Ver análise
           </button>
         </div>
       ),

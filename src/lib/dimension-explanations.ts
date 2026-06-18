@@ -4,6 +4,7 @@ import type {
   RankingIndex,
   RawMetrics,
 } from "@/lib/ranking";
+import { PUBLIC_VALUE_DIMENSION_LABELS } from "@/lib/public-value";
 
 export type DimensionExplanation = {
   title: string;
@@ -195,7 +196,7 @@ function publicVotesCardInfo(
     ],
     steps: [
       {
-        title: "Pontuação líquida de votos públicos",
+        title: "Pontuação líquida de votos",
         result: `${formattedNet} pontos em ${formatInteger(analyzed)} votos analisados`,
       },
       {
@@ -501,7 +502,7 @@ function resourcesSteps(
 
 function publicVotesExplanation(metrics: RawMetrics): DimensionExplanation {
   return {
-    title: "Votos públicos",
+    title: PUBLIC_VALUE_DIMENSION_LABELS.publicVotes,
     description:
       "Percentil nacional do saldo auditável de votos nominais classificados por impacto público, ajustado pelos meses de mandato.",
     details: [
@@ -564,7 +565,7 @@ function contributionExplanation(metrics: RawMetrics): DimensionExplanation {
       ? null
       : metrics.publicContributionPoints / metrics.monthsInOffice;
   return {
-    title: "Contribuição pública",
+    title: PUBLIC_VALUE_DIMENSION_LABELS.contribution,
     description:
       "Percentil nacional dos pontos por tema, autoria e estágio, ajustados pelos meses de mandato.",
     details: [
@@ -581,11 +582,11 @@ function contributionExplanation(metrics: RawMetrics): DimensionExplanation {
 function efficiencyExplanation(metrics: RawMetrics): DimensionExplanation {
   const ratio = publicValueEfficiencyPerHundredThousand(metrics);
   return {
-    title: "Eficiência financeira",
+    title: PUBLIC_VALUE_DIMENSION_LABELS.efficiency,
     description:
-      "Percentil nacional da relação entre pontos de contribuição e gastos da CEAP no mesmo período.",
+      "Percentil nacional da relação entre pontos de produção e gastos da CEAP no mesmo período.",
     details: [
-      `${formatDecimal(ratio)} pontos de contribuição por R$ 100 mil gastos.`,
+      `${formatDecimal(ratio)} pontos de produção por R$ 100 mil gastos.`,
       "Não usa presença ou votos e não é uma média mensal.",
     ],
   };
@@ -646,7 +647,7 @@ function campaignFinanceExplanation(metrics: RawMetrics): DimensionExplanation {
       : "indisponível";
   const hasFinance = metrics.totalCampaignReceipts !== null || metrics.totalCampaignExpenses !== null;
   return {
-    title: "Finanças de campanha",
+    title: PUBLIC_VALUE_DIMENSION_LABELS.campaignFinance,
     description: hasFinance
       ? "Indicadores de custo por voto, dependência de dinheiro público, concentração de receitas e despesas, e consistência patrimonial."
       : "Dados de prestação de contas eleitorais não disponíveis para este candidato.",

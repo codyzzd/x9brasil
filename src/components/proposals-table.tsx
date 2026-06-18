@@ -3,12 +3,15 @@
 import { useMemo, useState } from "react"
 import {
   ArrowRightLeft,
+  BadgeCheck,
+  Brain,
   ExternalLink,
   FileEdit,
   FileSearch,
   FileText,
   Heart,
   Info,
+  ListChecks,
   Pen,
   Search,
   Shield,
@@ -54,6 +57,7 @@ type Proposal = {
     confidence: string
     justification: string
     source: string
+    analysisLevel: 1 | 2 | 3
     stage: string
     stageMultiplier: number
     points: number
@@ -109,6 +113,23 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat("pt-BR").format(new Date(`${value}T12:00:00`))
 }
 
+function analysisMethod(source: string, analysisLevel: 1 | 2 | 3 | undefined) {
+  if (source === "reviewed") {
+    return { label: "Revisado manualmente", Icon: BadgeCheck }
+  }
+  const level = analysisLevel ?? (source === "rule" ? 1 : source === "llm" ? 2 : undefined)
+  if (level === 1) return { label: "Nível 1 · regra automática", Icon: ListChecks }
+  if (level === 2) return { label: "Nível 2 · IA com resumo", Icon: Sparkles }
+  if (level === 3) return { label: "Nível 3 · IA com inteiro teor", Icon: Brain }
+  return { label: "Não analisada", Icon: FileSearch }
+}
+
+function justificationTitle(source: string, analysisLevel: 1 | 2 | 3 | undefined) {
+  if (source === "reviewed") return "Justificativa da revisão"
+  const level = analysisLevel ?? (source === "rule" ? 1 : source === "llm" ? 2 : undefined)
+  return level && level > 1 ? "Justificativa da IA" : "Justificativa da regra"
+}
+
 function labelStyle(label: string) {
   const tone = labelTone(label)
   if (tone === "positive") {
@@ -147,6 +168,8 @@ function ProposalSheet({
   if (!proposal) return null
 
   const pv = proposal.publicValue
+  const method = pv ? analysisMethod(pv.source, pv.analysisLevel) : null
+  const MethodIcon = method?.Icon
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -161,91 +184,106 @@ function ProposalSheet({
         </SheetHeader>
 
         <div className="flex-1 space-y-5 p-4 pt-5">
-          {/* Ementa completa */}
           <section>
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-              Ementa
+              Dados oficiais
             </h4>
             <p className="text-sm leading-relaxed text-foreground">
               {proposal.summary}
             </p>
-          </section>
-
-          {/* Metadados */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                Tipo
-              </h4>
-              <p className="text-sm">{proposal.type}</p>
-            </div>
-            <div>
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                Papel
-              </h4>
+            <dl className="mt-4 grid grid-cols-2 gap-4">
+              <div>
+                <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  Tipo
+                </dt>
+                <dd className="text-sm">{proposal.type}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  Data
+                </dt>
+                <dd className="text-sm">{formatDate(proposal.date)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  Status
+                </dt>
+                <dd className="text-sm">{proposal.status}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  Papel
+                </dt>
+                <dd>
+                  <Badge
+                    variant="outline"
+                    className={cn("inline-flex items-center gap-1 text-[11px]", ROLE_STYLES[proposal.participationRole] || "")}
+                  >
+                    {ROLE_ICONS[proposal.participationRole]}
+                    {proposal.participationLabel}
+                  </Badge>
+                </dd>
+              </div>
+            </dl>
+            <div className="mt-4">
               <Badge
                 variant="outline"
-                className={cn("inline-flex items-center gap-1 text-[11px]", ROLE_STYLES[proposal.participationRole] || "")}
+                className={cn("inline-flex items-center gap-1 text-[11px]", NATURE_STYLES[proposal.proposalNature] || "")}
               >
-                {ROLE_ICONS[proposal.participationRole]}
-                {proposal.participationLabel}
+                {NATURE_ICONS[proposal.proposalNature]}
+                {proposal.proposalNatureLabel}
               </Badge>
             </div>
-            <div>
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                Status
-              </h4>
-              <p className="text-sm">{proposal.status}</p>
-            </div>
-            <div>
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                Data
-              </h4>
-              <p className="text-sm">{formatDate(proposal.date)}</p>
-            </div>
-          </div>
+          </section>
 
-          {/* Natureza */}
-          <div>
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-              Natureza da proposição
-            </h4>
-            <Badge
-              variant="outline"
-              className={cn("inline-flex items-center gap-1 text-[11px]", NATURE_STYLES[proposal.proposalNature] || "")}
-            >
-              {NATURE_ICONS[proposal.proposalNature]}
-              {proposal.proposalNatureLabel}
-            </Badge>
-          </div>
-
-          {/* Classificação e pontuação */}
           {pv && (
             <>
               <section>
                 <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
                   Classificação
                 </h4>
-                <Badge
-                  variant="outline"
-                  className={cn("inline-flex items-center gap-1 text-[11px]", labelStyle(pv.category))}
-                >
-                  <Sparkles className="size-3" />
-                  {pv.categoryLabel}
-                </Badge>
-                {pv.justification && (
-                  <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
-                    {pv.justification}
-                  </p>
-                )}
+                <div className="flex flex-wrap gap-1.5">
+                  <Badge
+                    variant="outline"
+                    className={cn("inline-flex items-center gap-1 text-[11px]", labelStyle(pv.category))}
+                  >
+                    <Sparkles className="size-3" />
+                    {pv.categoryLabel}
+                  </Badge>
+                  {method && MethodIcon && (
+                    <Badge variant="outline" className="inline-flex items-center gap-1 text-[11px]">
+                      <MethodIcon className="size-3" />
+                      {method.label}
+                    </Badge>
+                  )}
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Confiança: {pv.confidence === "high" ? "alta" : pv.confidence === "medium" ? "média" : "baixa"}
+                </p>
               </section>
 
               <section>
                 <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                  Pontuação
+                  Saiba por quê
+                </h4>
+                <p className="text-xs font-medium text-muted-foreground">
+                  {justificationTitle(pv.source, pv.analysisLevel)}
+                </p>
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  {pv.justification || "Esta proposição ainda não tem justificativa detalhada registrada."}
+                </p>
+              </section>
+
+              <section>
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                  Impacto
                 </h4>
                 <div className="space-y-1">
-                  <p className="text-lg font-semibold tabular-nums">
+                  <p className={cn(
+                    "text-lg font-semibold tabular-nums",
+                    pv.points > 0 ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground",
+                  )}>
+                    {pv.points > 0 ? "+" : ""}
                     {pv.points.toLocaleString("pt-BR", {
                       maximumFractionDigits: 2,
                     })}{" "}
@@ -259,13 +297,44 @@ function ProposalSheet({
                       <li>Bônus de avanço: +{pv.progressBonus}</li>
                     )}
                     <li>Estágio: {stageLabel(pv.stage)} (×{pv.stageMultiplier})</li>
+                    {method && <li>Método: {method.label}</li>}
                   </ul>
                 </div>
               </section>
             </>
           )}
 
-          {/* Link oficial */}
+          {!pv && (
+            <>
+              <section>
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                  Classificação
+                </h4>
+                <Badge variant="outline" className="inline-flex items-center gap-1 text-[11px]">
+                  <FileSearch className="size-3" />
+                  Não analisada
+                </Badge>
+              </section>
+              <section>
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                  Saiba por quê
+                </h4>
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  Esta proposição ainda não foi classificada pela metodologia de valor público.
+                </p>
+              </section>
+              <section>
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                  Impacto
+                </h4>
+                <p className="text-lg font-semibold tabular-nums text-muted-foreground">0 pts</p>
+                <p className="text-xs text-muted-foreground">
+                  Itens não analisados não entram na produção.
+                </p>
+              </section>
+            </>
+          )}
+
           <div className="pt-2">
             <a
               href={proposal.url}
@@ -334,7 +403,7 @@ export function ProposalsTable({ proposals }: { proposals: Proposal[] }) {
             onClick={() => openSheet(p)}
             className="mt-0.5 text-[11px] font-medium text-muted-foreground/60 hover:text-foreground transition-colors cursor-pointer"
           >
-            Ver ementa completa
+            Ver análise
           </button>
         </div>
       ),

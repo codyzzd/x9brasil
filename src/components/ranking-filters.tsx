@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { RankingComparison, RankingIndex } from "@/lib/ranking";
+import { PUBLIC_VALUE_DIMENSION_LABELS } from "@/lib/public-value";
 import { cn } from "@/lib/utils";
 
 export type RankingOrder =
@@ -56,33 +57,39 @@ export function RankingFilters({
   onPartyChange: (value: string) => void;
   onOrderChange: (value: RankingOrder) => void;
   onReset: () => void;
-  layout?: "panel" | "toolbar";
+  layout?: "panel" | "toolbar" | "inline";
 }) {
   const toolbar = layout === "toolbar";
+  const inline = layout === "inline";
+  const compact = toolbar || inline;
 
   return (
     <div
       className={cn(
+        inline && "contents",
         toolbar
           ? "rounded-lg border bg-card p-3 shadow-xs"
-          : "space-y-5",
+          : !inline && "space-y-5",
       )}
     >
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="font-semibold">Filtros</h2>
-        <Button variant="ghost" size="sm" onClick={onReset}>
-          <RotateCcw className="size-3.5" /> Limpar
-        </Button>
-      </div>
+      {!inline && (
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-semibold">Filtros</h2>
+          <Button variant="ghost" size="sm" onClick={onReset}>
+            <RotateCcw className="size-3.5" /> Limpar
+          </Button>
+        </div>
+      )}
 
       <div
         className={cn(
+          inline && "contents",
           toolbar
             ? "mt-3 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3"
-            : "space-y-5",
+            : !inline && "space-y-5",
         )}
       >
-        <FilterField label="Período" toolbar={toolbar}>
+        <FilterField label="Período" compact={compact}>
           <Select
             value={period}
             onValueChange={(value) => onPeriodChange(value ?? periods[0]?.id ?? "")}
@@ -101,7 +108,7 @@ export function RankingFilters({
             </SelectContent>
           </Select>
         </FilterField>
-        <FilterField label="Comparar posição com" toolbar={toolbar}>
+        <FilterField label="Comparar posição com" compact={compact}>
           <Select
             value={comparison}
             disabled={!/^\d{4}$/.test(period)}
@@ -126,7 +133,7 @@ export function RankingFilters({
             </SelectContent>
           </Select>
         </FilterField>
-        <FilterField label="Estado" toolbar={toolbar}>
+        <FilterField label="Estado" compact={compact}>
           <Select value={state} onValueChange={(value) => onStateChange(value ?? "all")}>
             <SelectTrigger className="w-full">
               <SelectValue>{state === "all" ? "Todo o Brasil" : state}</SelectValue>
@@ -141,7 +148,7 @@ export function RankingFilters({
             </SelectContent>
           </Select>
         </FilterField>
-        <FilterField label="Partido" toolbar={toolbar}>
+        <FilterField label="Partido" compact={compact}>
           <Select value={party} onValueChange={(value) => onPartyChange(value ?? "all")}>
             <SelectTrigger className="w-full">
               <SelectValue>
@@ -158,7 +165,7 @@ export function RankingFilters({
             </SelectContent>
           </Select>
         </FilterField>
-        <FilterField label="Ordenar por" toolbar={toolbar}>
+        <FilterField label="Ordenar por" compact={compact}>
           <Select
             value={order}
             onValueChange={(value) => onOrderChange((value ?? "score") as RankingOrder)}
@@ -181,28 +188,43 @@ export function RankingFilters({
                 </>
               ) : (
                 <>
-                  <SelectItem value="contribution">Contribuição pública</SelectItem>
-                  <SelectItem value="publicVotes">Votos públicos</SelectItem>
-                  <SelectItem value="efficiency">Eficiência financeira</SelectItem>
+                  <SelectItem value="contribution">
+                    {PUBLIC_VALUE_DIMENSION_LABELS.contribution}
+                  </SelectItem>
+                  <SelectItem value="publicVotes">
+                    {PUBLIC_VALUE_DIMENSION_LABELS.publicVotes}
+                  </SelectItem>
+                  <SelectItem value="efficiency">Eficiência</SelectItem>
                 </>
               )}
-              <SelectItem value="campaignFinance">Finanças de campanha</SelectItem>
+              <SelectItem value="campaignFinance">Campanha</SelectItem>
             </SelectContent>
           </Select>
         </FilterField>
+        {inline && (
+          <Button
+            variant="ghost"
+            className="h-10 self-end"
+            onClick={onReset}
+          >
+            <RotateCcw className="size-3.5" /> Limpar
+          </Button>
+        )}
       </div>
 
-      <div
-        className={cn(
-          "text-xs leading-5 text-muted-foreground",
-          toolbar
-            ? "mt-3 rounded-md bg-muted/60 px-3 py-2"
-            : "rounded-lg bg-muted p-4",
-        )}
-      >
-        Posições e notas são nacionais; estado e partido apenas filtram a lista.
-        A busca por nome apenas localiza o parlamentar.
-      </div>
+      {!inline && (
+        <div
+          className={cn(
+            "text-xs leading-5 text-muted-foreground",
+            toolbar
+              ? "mt-3 rounded-md bg-muted/60 px-3 py-2"
+              : "rounded-lg bg-muted p-4",
+          )}
+        >
+          Posições e notas são nacionais; estado e partido apenas filtram a lista.
+          A busca por nome apenas localiza o parlamentar.
+        </div>
+      )}
     </div>
   );
 }
@@ -224,25 +246,25 @@ function orderLabel(order: RankingOrder, index: RankingIndex) {
     participation: "Participação",
     production: "Produção",
     resources: "Uso de recursos",
-    contribution: "Contribuição pública",
-    publicVotes: "Votos públicos",
-    efficiency: "Eficiência financeira",
-    campaignFinance: "Finanças de campanha",
+    contribution: PUBLIC_VALUE_DIMENSION_LABELS.contribution,
+    publicVotes: PUBLIC_VALUE_DIMENSION_LABELS.publicVotes,
+    efficiency: "Eficiência",
+    campaignFinance: "Campanha",
   }[order];
 }
 
 function FilterField({
   label,
-  toolbar = false,
+  compact = false,
   children,
 }: {
   label: string;
-  toolbar?: boolean;
+  compact?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <label className={cn("block space-y-2 font-medium", toolbar ? "text-xs" : "text-sm")}>
-      <span className={toolbar ? "text-muted-foreground" : undefined}>{label}</span>
+    <label className={cn("block space-y-2 font-medium", compact ? "text-xs" : "text-sm")}>
+      <span className={compact ? "text-muted-foreground" : undefined}>{label}</span>
       {children}
     </label>
   );

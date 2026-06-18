@@ -1,4 +1,3 @@
-import { Info } from "lucide-react";
 import { RankingBrowser } from "@/components/ranking-browser";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -29,25 +28,20 @@ export default async function Home({
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
       <main className="flex-1">
-        <div className="mx-auto w-full max-w-[1920px] px-4 py-8">
-          <div className="mb-7 flex flex-col justify-between gap-4 md:flex-row md:items-end">
-            <div>
-              <Badge variant="secondary">Dados públicos oficiais</Badge>
-              <h1 className="mt-3 text-3xl font-bold tracking-tight text-balance sm:text-4xl">
-                Ranking de deputados federais
-              </h1>
-              <p className="mt-2 max-w-3xl text-muted-foreground text-pretty">
-                Compare participação, contribuição temática, eficiência e
-                transparência na legislatura iniciada em 1º de fevereiro de 2023.
-              </p>
-            </div>
-            <div className="flex max-w-md gap-2 rounded-lg bg-muted p-3 text-xs leading-5 text-muted-foreground">
-              <Info className="mt-0.5 size-4 shrink-0" />
-              <p>
-                O score é comparativo e informativo. Ele não mede ideologia,
-                honestidade ou intenção de voto.
-              </p>
-            </div>
+        <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
+          <div className="mb-5 max-w-4xl">
+            <Badge variant="secondary">Dados públicos oficiais</Badge>
+            <h1 className="mt-3 text-3xl font-bold tracking-tight text-balance sm:text-4xl">
+              Ranking de deputados federais
+            </h1>
+            <p className="mt-2 text-muted-foreground text-pretty">
+              Compare participação, contribuição temática, eficiência e
+              transparência na legislatura iniciada em 1º de fevereiro de 2023.
+            </p>
+            <p className="mt-4 max-w-3xl text-sm leading-6 text-muted-foreground text-pretty">
+              O score é comparativo e informativo. Ele não mede ideologia,
+              honestidade ou intenção de voto.
+            </p>
           </div>
           <div className="mb-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
             <span className="font-medium text-muted-foreground">Escala:</span>

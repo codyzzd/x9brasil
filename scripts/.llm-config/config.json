@@ -1,10 +1,10 @@
 {
-  "lastProvider": "lmstudio",
-  "lastModel": "llama-3.2-3b-instruct",
+  "lastProvider": "openai",
+  "lastModel": "gpt-5.4-mini",
   "lastMode": "advanced",
   "providers": {
     "openai": {
-      "baseUrl": "https://api.deepseek.com"
+      "baseUrl": "https://api.openai.com"
     },
     "ollama": {
       "baseUrl": "http://localhost:11434"

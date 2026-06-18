@@ -3,6 +3,11 @@ import {
   interactiveSelect,
   getProvider,
 } from "./providers";
+import type { ProviderId } from "./providers";
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
 
 async function main() {
   const config = await loadConfig();
@@ -10,9 +15,9 @@ async function main() {
   const argsProvider = process.argv.find((a) => a.startsWith("--provider="));
 
   if (argsProvider) {
-    const providerId = argsProvider.split("=")[1];
-    const providerConfig = config.providers[providerId as keyof typeof config.providers];
-    const provider = getProvider(providerId as any, providerConfig);
+    const providerId = argsProvider.split("=")[1] as ProviderId;
+    const providerConfig = config.providers[providerId];
+    const provider = getProvider(providerId, providerConfig);
     await listModels(provider);
   } else {
     const selection = await interactiveSelect(config, "listar modelos");
@@ -32,8 +37,8 @@ async function listModels(provider: ReturnType<typeof getProvider>) {
     for (const m of models) {
       console.log(`  - ${m}`);
     }
-  } catch (err: any) {
-    console.error(`Erro ao listar modelos: ${err.message || err}`);
+  } catch (err: unknown) {
+    console.error(`Erro ao listar modelos: ${errorMessage(err)}`);
     process.exit(1);
   }
 }

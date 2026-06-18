@@ -21,7 +21,9 @@ export function DimensionScore({
   value,
   compact = false,
   compactBar = false,
+  showCompactLabel = false,
   dense = false,
+  compactValueAlign = "center",
   explanation,
   index = "current",
 }: {
@@ -29,7 +31,9 @@ export function DimensionScore({
   value: number | null;
   compact?: boolean;
   compactBar?: boolean;
+  showCompactLabel?: boolean;
   dense?: boolean;
+  compactValueAlign?: "center" | "right";
   explanation?: DimensionExplanation;
   index?: RankingIndex;
 }) {
@@ -45,14 +49,27 @@ export function DimensionScore({
   const content = compact ? (
     compactBar ? (
       <div className="min-w-0 space-y-1.5">
-        <span
+        <div
           className={cn(
-            "block text-center text-sm font-semibold tabular-nums",
-            style.text,
+            "flex min-w-0 items-center gap-2",
+            showCompactLabel ? "justify-between" : "justify-end",
+            compactValueAlign === "center" && !showCompactLabel && "justify-center",
           )}
         >
-          {value === null ? "N/D" : value}
-        </span>
+          {showCompactLabel && (
+            <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+              {label}
+            </span>
+          )}
+          <span
+            className={cn(
+              "shrink-0 text-sm font-semibold tabular-nums",
+              style.text,
+            )}
+          >
+            {value === null ? "N/D" : value}
+          </span>
+        </div>
         <Progress
           value={value ?? 0}
           className="h-1.5 w-full"
@@ -62,7 +79,8 @@ export function DimensionScore({
     ) : (
       <span
         className={cn(
-          "block text-center text-sm font-semibold tabular-nums",
+          "block text-sm font-semibold tabular-nums",
+          compactValueAlign === "right" ? "text-right" : "text-center",
           style.text,
         )}
       >

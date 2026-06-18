@@ -830,6 +830,7 @@ function classifyProposalFull(proposalId: string, summary: string, _role: Partic
     confidence: classification.confidence,
     justification: classification.justification,
     source: classification.source,
+    analysisLevel: classification.analysisLevel,
     stage: "presented" as ProposalStage,
     stageMultiplier: 0.25,
     points: catInfo.weight * 0.25,
@@ -852,7 +853,7 @@ async function getDeputyVotes(legislatorId: number, periodId: string) {
 
   const { data: classifications } = await supabase
     .from("vote_classifications")
-    .select("vote_id, classification, severity")
+    .select("vote_id, classification, severity, source, analysis_level, reviewed_manually")
     .in("vote_id", data.map((r: Record<string, unknown>) => r.vote_id));
 
   const classMap = new Map((classifications ?? []).map((c: Record<string, unknown>) => [c.vote_id as string, c]));
@@ -879,8 +880,9 @@ async function getDeputyVotes(legislatorId: number, periodId: string) {
         scoreDelta: Number(row.score_delta),
         confidence: row.confidence === null || row.confidence === undefined ? null : Number(row.confidence),
         reason: (row.reason as string) ?? "",
-        source: (row.source as string) ?? "",
-        reviewedManually: (row.reviewed_manually as boolean) ?? false,
+        source: (cls?.source as string) ?? (row.source as string) ?? "",
+        analysisLevel: (cls?.analysis_level as 1 | 2 | 3 | null) ?? null,
+        reviewedManually: ((cls?.reviewed_manually as boolean | null) ?? (row.reviewed_manually as boolean)) ?? false,
       };
     })
     .sort(
