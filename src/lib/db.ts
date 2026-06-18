@@ -31,6 +31,18 @@ export type SnapshotMetadata = {
   sources: Array<{ name: string; url: string; updatedAt: string }>;
 };
 
+export type DataBannerStats = {
+  updatedAt: string;
+  totalItems: number;
+  classifiedItems: number;
+  coveragePercent: number;
+  levels: {
+    level1: { count: number; percent: number };
+    level2: { count: number; percent: number };
+    level3: { count: number; percent: number };
+  };
+};
+
 const SUPABASE_PAGE_SIZE = 1000;
 
 async function fetchAllRows<T>(
@@ -79,6 +91,69 @@ export async function getSnapshotMetadata(): Promise<SnapshotMetadata> {
       updatedAt: (s.updated_at as string) ?? "",
     })),
   };
+}
+
+export async function getDataBannerStats(): Promise<DataBannerStats> {
+  "use cache";
+  cacheLife("hours");
+  cacheTag("metadata");
+
+  const [metadata, proposalCount, voteCount, proposalClassCount, voteClassCount, p1, p2, p3, v1, v2, v3] =
+    await Promise.all([
+      getSnapshotMetadata(),
+      countRows("proposals"),
+      countRows("votes"),
+      countRows("proposal_classifications"),
+      countRows("vote_classifications"),
+      countRows("proposal_classifications", { column: "analysis_level", value: 1 }),
+      countRows("proposal_classifications", { column: "analysis_level", value: 2 }),
+      countRows("proposal_classifications", { column: "analysis_level", value: 3 }),
+      countRows("vote_classifications", { column: "analysis_level", value: 1 }),
+      countRows("vote_classifications", { column: "analysis_level", value: 2 }),
+      countRows("vote_classifications", { column: "analysis_level", value: 3 }),
+    ]);
+
+  const totalItems = proposalCount + voteCount;
+  const classifiedItems = proposalClassCount + voteClassCount;
+  const sourceDates = metadata.sources
+    .map((source) => source.updatedAt)
+    .filter(Boolean)
+    .sort((a, b) => b.localeCompare(a));
+  const updatedAt = sourceDates[0] ?? metadata.generatedAt;
+
+  return {
+    updatedAt,
+    totalItems,
+    classifiedItems,
+    coveragePercent: percent(classifiedItems, totalItems),
+    levels: {
+      level1: { count: p1 + v1, percent: percent(p1 + v1, totalItems) },
+      level2: { count: p2 + v2, percent: percent(p2 + v2, totalItems) },
+      level3: { count: p3 + v3, percent: percent(p3 + v3, totalItems) },
+    },
+  };
+}
+
+async function countRows(
+  table:
+    | "proposals"
+    | "votes"
+    | "proposal_classifications"
+    | "vote_classifications",
+  filter?: { column: "analysis_level"; value: 1 | 2 | 3 },
+) {
+  const query = supabase.from(table).select("*", { count: "exact", head: true });
+  const { count, error } = filter
+    ? await query.eq(filter.column, filter.value)
+    : await query;
+
+  if (error) throw error;
+  return count ?? 0;
+}
+
+function percent(value: number, total: number) {
+  if (total <= 0) return 0;
+  return Math.round((value / total) * 1000) / 10;
 }
 
 export async function getFullSnapshot(): Promise<RankingSnapshot> {
@@ -138,7 +213,9 @@ export async function getFullSnapshot(): Promise<RankingSnapshot> {
           metrics: {
             monthsInOffice: Number(m.months_in_office ?? 0),
             plenaryAttendances: m.plenary_attendances as number | null,
+            plenarySessionsTotal: m.plenary_sessions_total as number | null,
             nominalVotes: m.nominal_votes as number | null,
+            nominalVotesTotal: m.nominal_votes_total as number | null,
             substantiveProposals: m.substantive_proposals as number | null,
             oversightProposals: m.oversight_proposals as number | null,
             advancedProposals: m.advanced_proposals as number | null,
@@ -359,7 +436,9 @@ export async function getPeriodMetrics(periodId: string): Promise<PeriodDeputyRe
     metrics: {
       monthsInOffice: Number(row.months_in_office ?? 0),
       plenaryAttendances: row.plenary_attendances as number | null,
+      plenarySessionsTotal: row.plenary_sessions_total as number | null,
       nominalVotes: row.nominal_votes as number | null,
+      nominalVotesTotal: row.nominal_votes_total as number | null,
       substantiveProposals: row.substantive_proposals as number | null,
       oversightProposals: row.oversight_proposals as number | null,
       advancedProposals: row.advanced_proposals as number | null,
@@ -598,6 +677,7 @@ function mergePeriods(
       .flatMap((period) => period.publicVotes || [])
       .sort(
         (a, b) =>
+          Number(b.classification !== "unanalyzed") - Number(a.classification !== "unanalyzed") ||
           Math.abs(b.scoreDelta) - Math.abs(a.scoreDelta) ||
           b.date.localeCompare(a.date),
       ),
@@ -698,7 +778,7 @@ async function getDeputyProposals(legislatorId: number, periodId: string) {
   const { data: reviewedClassifications } = proposalIds.length > 0
     ? await supabase
         .from("proposal_classifications")
-        .select("proposal_id, category, confidence, justification, source, methodology_version")
+        .select("proposal_id, category, confidence, justification, source, analysis_level, methodology_version")
         .in("proposal_id", proposalIds)
     : { data: [] as Record<string, unknown>[] | null };
 
@@ -713,7 +793,8 @@ async function getDeputyProposals(legislatorId: number, periodId: string) {
           category: reviewedCls.category as PublicValueCategory,
           confidence: reviewedCls.confidence as ClassificationConfidence,
           justification: reviewedCls.justification as string,
-          source: reviewedCls.source as "reviewed" | "rule",
+          source: reviewedCls.source as "reviewed" | "rule" | "llm",
+          analysisLevel: (reviewedCls.analysis_level as 1 | 2 | 3 | null) ?? 2,
           methodologyVersion: reviewedCls.methodology_version as string,
         }
       : classifyProposal(row.proposal_id as string, summary);
@@ -765,8 +846,7 @@ async function getDeputyVotes(legislatorId: number, periodId: string) {
     .from("legislator_votes")
     .select("vote_id, candidate_vote, score_delta, confidence, reason, source, reviewed_manually, votes(id, vote_date, description, summary, url)")
     .eq("legislator_id", legislatorId)
-    .eq("period_id", periodId)
-    .order("score_delta", { ascending: false });
+    .eq("period_id", periodId);
 
   if (!data) return [];
 
@@ -777,25 +857,38 @@ async function getDeputyVotes(legislatorId: number, periodId: string) {
 
   const classMap = new Map((classifications ?? []).map((c: Record<string, unknown>) => [c.vote_id as string, c]));
 
-  return data.map((row: Record<string, unknown>) => {
-    const vote = row.votes as Record<string, unknown> | null;
-    const cls = classMap.get(row.vote_id as string) as Record<string, unknown> | undefined;
-    return {
-      voteId: row.vote_id as string,
-      date: (vote?.vote_date as string) ?? "",
-      description: (vote?.description as string) ?? "",
-      summary: (vote?.summary as string) ?? "",
-      url: (vote?.url as string) ?? "",
-      candidateVote: row.candidate_vote as string,
-      classification: (cls?.classification as string) ?? "",
-      severity: (cls?.severity as string) ?? "",
-      scoreDelta: Number(row.score_delta),
-      confidence: Number(row.confidence ?? 0),
-      reason: (row.reason as string) ?? "",
-      source: (row.source as string) ?? "",
-      reviewedManually: (row.reviewed_manually as boolean) ?? false,
-    };
-  });
+  return data
+    .map((row: Record<string, unknown>) => {
+      const vote = row.votes as Record<string, unknown> | null;
+      const cls = classMap.get(row.vote_id as string) as Record<string, unknown> | undefined;
+      const hasLinkAnalysis =
+        row.confidence !== null ||
+        Boolean(row.reason) ||
+        Boolean(row.source) ||
+        Boolean(row.reviewed_manually) ||
+        Number(row.score_delta) !== 0;
+      return {
+        voteId: row.vote_id as string,
+        date: (vote?.vote_date as string) ?? "",
+        description: (vote?.description as string) ?? "",
+        summary: (vote?.summary as string) ?? "",
+        url: (vote?.url as string) ?? "",
+        candidateVote: row.candidate_vote as string,
+        classification: (cls?.classification as string) ?? (hasLinkAnalysis ? "analyzed" : "unanalyzed"),
+        severity: (cls?.severity as string) ?? "",
+        scoreDelta: Number(row.score_delta),
+        confidence: row.confidence === null || row.confidence === undefined ? null : Number(row.confidence),
+        reason: (row.reason as string) ?? "",
+        source: (row.source as string) ?? "",
+        reviewedManually: (row.reviewed_manually as boolean) ?? false,
+      };
+    })
+    .sort(
+      (a, b) =>
+        Number(b.classification !== "unanalyzed") - Number(a.classification !== "unanalyzed") ||
+        Math.abs(b.scoreDelta) - Math.abs(a.scoreDelta) ||
+        b.date.localeCompare(a.date),
+    );
 }
 
 async function getAmendments(legislatorId: number, periodId: string) {

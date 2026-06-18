@@ -23,6 +23,10 @@ npm start
 A aplicação lê dados diretamente do Supabase. Os snapshots JSON locais em
 `src/data/` foram removidos e não fazem parte do fluxo de runtime.
 
+Para entender o caminho completo dos dados, da ingestão nas fontes públicas até
+o Supabase e os níveis de classificação, veja
+[`DATA_PIPELINE.md`](./DATA_PIPELINE.md).
+
 ### Ingestão direta para Supabase
 
 Use `data:supabase:ingest` quando precisar carregar um CSV/ZIP diretamente para

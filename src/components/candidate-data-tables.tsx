@@ -1,18 +1,10 @@
 "use client"
 
-import { useState, useMemo } from "react"
-import { ExternalLink, Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight } from "lucide-react"
+import { useState } from "react"
+import { ExternalLink } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { buttonVariants } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   Sheet,
   SheetContent,
@@ -22,11 +14,12 @@ import {
 } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 import { formatCurrency } from "@/lib/ranking"
-import { DataTable, type FilterDef } from "@/components/data-table"
+import { DataTable, type Column, type FilterDef } from "@/components/data-table"
 
 /* ───── helpers ───── */
 
 function formatDate(value: string) {
+  if (!value) return "-"
   return new Intl.DateTimeFormat("pt-BR").format(new Date(`${value}T12:00:00`))
 }
 
@@ -37,6 +30,8 @@ function formatDecimal(value: number | null | undefined) {
 }
 
 function publicVoteClassificationLabel(value: string) {
+  if (value === "unanalyzed") return "não analisado"
+  if (value === "analyzed") return "analisado"
   if (value === "positive_public_interest") return "interesse público"
   if (value === "low_relevance") return "baixa relevância"
   if (value === "negative_public_interest") return "negativa"
@@ -45,6 +40,7 @@ function publicVoteClassificationLabel(value: string) {
 }
 
 function severityLabel(value: string) {
+  if (!value) return "-"
   if (value === "critical") return "crítica"
   if (value === "high") return "alta"
   if (value === "medium") return "média"
@@ -52,6 +48,7 @@ function severityLabel(value: string) {
 }
 
 function severityPoints(value: string) {
+  if (!value) return 0
   if (value === "critical") return 30
   if (value === "high") return 18
   if (value === "medium") return 10
@@ -66,6 +63,8 @@ function candidateVoteLabel(value: string) {
 }
 
 const CLASSIFICATION_STYLES: Record<string, string> = {
+  unanalyzed: "border-muted bg-muted text-muted-foreground",
+  analyzed: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-400",
   positive_public_interest: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400",
   neutral: "border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-gray-900/30 dark:text-gray-400",
   low_relevance: "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900/30 dark:text-slate-400",
@@ -123,7 +122,7 @@ const VOTE_BAR_SEGMENTS: {
 type ExpenseCategory = { name: string; total: number; documents: number }
 type Supplier = { name: string; taxId: string | null; total: number; documents: number }
 type LargestExpense = { category: string; supplier: string; date: string; value: number; documentUrl: string | null }
-type PublicVote = { voteId: string; date: string; description: string; summary: string; url: string; candidateVote: string; classification: string; severity: string; scoreDelta: number; confidence: number; reason: string; source: string; reviewedManually: boolean }
+type PublicVote = { voteId: string; date: string; description: string; summary: string; url: string; candidateVote: string; classification: string; severity: string; scoreDelta: number; confidence: number | null; reason: string; source: string; reviewedManually: boolean }
 type Amendment = { number: string; year: string; type: string; beneficiary: string; proposedValue: number; transferredValue: number }
 type Asset = { type: string; description: string; value: number }
 type CampaignDonor = { name: string; value: number }
@@ -188,13 +187,14 @@ function VoteDetailSheet({
 }) {
   if (!vote) return null
 
+  const analyzed = vote.classification !== "unanalyzed"
   const aligned =
     vote.classification === "positive_public_interest" || vote.classification === "neutral"
       ? vote.candidateVote === "yes"
       : vote.candidateVote === "no"
   const points = severityPoints(vote.severity)
   const methodLabel =
-    vote.source === "reviewed" ? "Revisão manual" : "Regra automática"
+    !analyzed ? "Não analisada" : vote.source === "reviewed" ? "Revisão manual" : "Regra automática"
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -204,7 +204,9 @@ function VoteDetailSheet({
             Votação {vote.voteId}
           </SheetTitle>
           <SheetDescription>
-            Detalhes completos da votação e do impacto no score
+            {analyzed
+              ? "Detalhes completos da votação e do impacto no score"
+              : "Esta votação ainda não entrou no cálculo do score"}
           </SheetDescription>
         </SheetHeader>
 
@@ -272,7 +274,7 @@ function VoteDetailSheet({
               Justificativa
             </h4>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              {vote.reason}
+              {vote.reason || "Esta votação ainda não foi classificada pela metodologia de valor público."}
             </p>
           </section>
 
@@ -285,14 +287,27 @@ function VoteDetailSheet({
                 {vote.scoreDelta > 0 ? "+" : ""}{formatDecimal(vote.scoreDelta)} pts
               </p>
               <ul className="space-y-0.5 text-xs text-muted-foreground">
-                <li>Pontos base da severidade ({severityLabel(vote.severity)}): {points}</li>
-                {vote.candidateVote === "absent" && (
-                  <li>Ausência em votação de severidade {severityLabel(vote.severity)}</li>
+                {analyzed ? (
+                  <>
+                    {vote.severity ? (
+                      <li>Pontos base da severidade ({severityLabel(vote.severity)}): {points}</li>
+                    ) : (
+                      <li>Classificação detalhada indisponível neste registro.</li>
+                    )}
+                    {vote.candidateVote === "absent" && (
+                      <li>Ausência em votação de severidade {severityLabel(vote.severity)}</li>
+                    )}
+                    {vote.severity && vote.candidateVote !== "absent" && vote.candidateVote !== "abstain" && (
+                      <li>Voto {aligned ? "alinhado" : "contrário"} ao interesse público</li>
+                    )}
+                    <li>
+                      Confiança da classificação:{" "}
+                      {vote.confidence === null ? "Dados indisponíveis" : `${formatDecimal(vote.confidence * 100)}%`}
+                    </li>
+                  </>
+                ) : (
+                  <li>Esta votação ainda não entrou no cálculo do score.</li>
                 )}
-                {vote.candidateVote !== "absent" && vote.candidateVote !== "abstain" && (
-                  <li>Voto {aligned ? "alinhado" : "contrário"} ao interesse público</li>
-                )}
-                <li>Confiança da classificação: {formatDecimal(vote.confidence * 100)}%</li>
                 <li>Metodologia: {methodLabel}</li>
               </ul>
             </div>
@@ -378,186 +393,6 @@ export function LargestExpensesTable({ data }: { data: LargestExpense[] }) {
   )
 }
 
-const ITEMS_PER_PAGE = 15
-
-type SortKey = "date" | "classification" | "impact"
-type SortDir = "asc" | "desc"
-
-function VoteVoteList({
-  data,
-  onOpenSheet,
-  classificationFilter,
-}: {
-  data: PublicVote[]
-  onOpenSheet: (vote: PublicVote) => void
-  classificationFilter: FilterDef<PublicVote>
-}) {
-  const [search, setSearch] = useState("")
-  const [page, setPage] = useState(0)
-  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "impact", dir: "desc" })
-  const [activeClassification, setActiveClassification] = useState("")
-
-  const filtered = useMemo(() => {
-    let result = data
-    if (search) {
-      const q = search.toLowerCase()
-      result = result.filter(
-        (v) =>
-          v.description.toLowerCase().includes(q) ||
-          (v.summary ?? "").toLowerCase().includes(q),
-      )
-    }
-    if (activeClassification) {
-      result = result.filter((v) => v.classification === activeClassification)
-    }
-    return result
-  }, [data, search, activeClassification])
-
-  const sorted = useMemo(() => {
-    const items = [...filtered]
-    items.sort((a, b) => {
-      const dir = sort.dir === "asc" ? 1 : -1
-      if (sort.key === "date") return dir * a.date.localeCompare(b.date)
-      if (sort.key === "classification") return dir * a.classification.localeCompare(b.classification)
-      return dir * (Math.abs(a.scoreDelta) - Math.abs(b.scoreDelta))
-    })
-    return items
-  }, [filtered, sort])
-
-  const totalPages = Math.max(1, Math.ceil(sorted.length / ITEMS_PER_PAGE))
-  const currentPage = Math.min(page, totalPages - 1)
-  const paginated = sorted.slice(
-    currentPage * ITEMS_PER_PAGE,
-    (currentPage + 1) * ITEMS_PER_PAGE,
-  )
-
-  function toggleSort(key: SortKey) {
-    setSort((prev) =>
-      prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" },
-    )
-  }
-
-  if (!data.length) {
-    return <p className="py-6 text-center text-sm text-muted-foreground">Nenhuma votação classificada entrou no cálculo deste período.</p>
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-48 flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Buscar por descrição..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(0) }}
-            className="pl-8"
-          />
-        </div>
-        <Select value={activeClassification} onValueChange={(v) => { setActiveClassification(v === "" ? "" : v ?? ""); setPage(0) }}>
-          <SelectTrigger className="w-auto min-w-36">
-            <SelectValue placeholder="Classificação" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">Todas</SelectItem>
-            {classificationFilter.options.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex items-center gap-4 text-xs text-muted-foreground border-b pb-2">
-        <span className="flex-[3]">Descrição</span>
-        <span className="flex-[2] flex items-center gap-1">
-          <button type="button" onClick={() => toggleSort("classification")} className={cn("inline-flex items-center gap-1 text-xs font-medium cursor-pointer", sort.key === "classification" ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
-            Classificação
-            {sort.key === "classification" ? (
-              sort.dir === "asc" ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />
-            ) : (
-              <ArrowUpDown className="size-3 opacity-40" />
-            )}
-          </button>
-        </span>
-        <span className="w-[70px] text-right flex items-center justify-end gap-1">
-          <button type="button" onClick={() => toggleSort("impact")} className={cn("inline-flex items-center gap-1 text-xs font-medium cursor-pointer", sort.key === "impact" ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
-            Impacto
-            {sort.key === "impact" ? (
-              sort.dir === "asc" ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />
-            ) : (
-              <ArrowUpDown className="size-3 opacity-40" />
-            )}
-          </button>
-        </span>
-      </div>
-
-      <div className="divide-y rounded-lg border">
-        {paginated.map((vote, idx) => (
-          <button
-            key={`${vote.voteId}-${vote.candidateVote}-${idx}`}
-            type="button"
-            onClick={() => onOpenSheet(vote)}
-            className="flex w-full items-start gap-4 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors cursor-pointer"
-          >
-            <div className="flex-[3] min-w-0">
-              <p className="text-sm font-medium leading-snug line-clamp-2">{vote.description}</p>
-              <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-                <span>{formatDate(vote.date)}</span>
-                <span>·</span>
-                <span>Voto: {candidateVoteLabel(vote.candidateVote)}</span>
-                <span>·</span>
-                <span>Confiança {formatDecimal(vote.confidence * 100)}%</span>
-              </div>
-            </div>
-            <div className="flex-[2] min-w-0">
-              <div className="flex flex-wrap gap-1">
-                <Badge variant="secondary" className={cn("text-[11px]", CLASSIFICATION_STYLES[vote.classification] || "")}>{publicVoteClassificationLabel(vote.classification)}</Badge>
-                <Badge variant="outline" className={cn("text-[11px]", SEVERITY_STYLES[vote.severity] || "")}>{severityLabel(vote.severity)}</Badge>
-              </div>
-            </div>
-            <div className="w-[70px] shrink-0 text-right">
-              <span className={cn("font-semibold tabular-nums text-sm", vote.scoreDelta < 0 ? "text-red-700 dark:text-red-400" : vote.scoreDelta > 0 ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>
-                {vote.scoreDelta > 0 ? "+" : ""}{formatDecimal(vote.scoreDelta)}
-              </span>
-            </div>
-          </button>
-        ))}
-      </div>
-
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">
-          {sorted.length} registro{sorted.length !== 1 ? "s" : ""}
-          {search || activeClassification ? " encontrado" + (sorted.length !== 1 ? "s" : "") : ""}
-        </p>
-        {totalPages > 1 && (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }), currentPage === 0 && "pointer-events-none opacity-50")}
-              disabled={currentPage === 0}
-              onClick={() => setPage(currentPage - 1)}
-            >
-              <ChevronLeft className="size-4" />
-              Anterior
-            </button>
-            <span className="text-xs tabular-nums text-muted-foreground">
-              {currentPage + 1} de {totalPages}
-            </span>
-            <button
-              type="button"
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }), currentPage >= totalPages - 1 && "pointer-events-none opacity-50")}
-              disabled={currentPage >= totalPages - 1}
-              onClick={() => setPage(currentPage + 1)}
-            >
-              Próximo
-              <ChevronRight className="size-4" />
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 export function PublicVotesTable({ data }: { data: PublicVote[] }) {
   const [selected, setSelected] = useState<PublicVote | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -567,22 +402,182 @@ export function PublicVotesTable({ data }: { data: PublicVote[] }) {
     setSheetOpen(true)
   }
 
-  const classificationFilter: FilterDef<PublicVote> = {
-    id: "classification",
-    label: "Classificação",
-    options: [
-      { value: "positive_public_interest", label: "Interesse público" },
-      { value: "low_relevance", label: "Baixa relevância" },
-      { value: "negative_public_interest", label: "Negativa" },
-      { value: "harmful_or_self_serving", label: "Auto-benefício" },
-      { value: "neutral", label: "Neutra" },
-    ],
-    getValue: (vote) => vote.classification,
-  }
+  const filters: FilterDef<PublicVote>[] = [
+    {
+      id: "status",
+      label: "Status",
+      options: [
+        { value: "analyzed", label: "Analisados" },
+        { value: "unanalyzed", label: "Não analisados" },
+      ],
+      getValue: (vote) => vote.classification === "unanalyzed" ? "unanalyzed" : "analyzed",
+    },
+    {
+      id: "classification",
+      label: "Classificação",
+      options: [
+        { value: "positive_public_interest", label: "Interesse público" },
+        { value: "low_relevance", label: "Baixa relevância" },
+        { value: "negative_public_interest", label: "Negativa" },
+        { value: "harmful_or_self_serving", label: "Auto-benefício" },
+        { value: "neutral", label: "Neutra" },
+        { value: "analyzed", label: "Analisada" },
+      ],
+      getValue: (vote) => vote.classification,
+    },
+    {
+      id: "candidateVote",
+      label: "Voto",
+      options: [
+        { value: "yes", label: "Sim" },
+        { value: "no", label: "Não" },
+        { value: "absent", label: "Ausente" },
+        { value: "abstain", label: "Abstenção" },
+      ],
+      getValue: (vote) => vote.candidateVote,
+    },
+    {
+      id: "severity",
+      label: "Severidade",
+      options: [
+        { value: "critical", label: "Crítica" },
+        { value: "high", label: "Alta" },
+        { value: "medium", label: "Média" },
+        { value: "low", label: "Baixa" },
+      ],
+      getValue: (vote) => vote.severity,
+    },
+  ]
+
+  const columns: Column<PublicVote>[] = [
+    {
+      id: "votacao",
+      header: "Votação",
+      sortable: true,
+      sortValue: (vote) => `${vote.date} ${vote.description}`,
+      className: "w-[34%] whitespace-normal",
+      headerClassName: "w-[34%]",
+      cell: (vote) => (
+        <div>
+          <button
+            type="button"
+            onClick={() => openSheet(vote)}
+            className="inline-flex items-center gap-1 text-left text-sm font-medium underline-offset-2 hover:underline"
+          >
+            {vote.voteId}
+            <ExternalLink className="size-3 shrink-0 text-muted-foreground" />
+          </button>
+          <p className="mt-0.5 line-clamp-3 text-pretty text-xs leading-relaxed text-muted-foreground">
+            {vote.description}
+          </p>
+          <button
+            type="button"
+            onClick={() => openSheet(vote)}
+            className="mt-0.5 text-[11px] font-medium text-muted-foreground/60 transition-colors hover:text-foreground"
+          >
+            Ver detalhes da votação
+          </button>
+        </div>
+      ),
+    },
+    {
+      id: "voto",
+      header: "Voto",
+      sortable: true,
+      sortValue: (vote) => candidateVoteLabel(vote.candidateVote),
+      className: "w-[82px]",
+      headerClassName: "w-[82px]",
+      cell: (vote) => (
+        <span className="text-xs font-medium">{candidateVoteLabel(vote.candidateVote)}</span>
+      ),
+    },
+    {
+      id: "classificacao",
+      header: "Classificação",
+      sortable: true,
+      sortValue: (vote) => publicVoteClassificationLabel(vote.classification),
+      className: "w-[150px]",
+      headerClassName: "w-[150px]",
+      cell: (vote) => (
+        <Badge
+          variant="secondary"
+          className={cn("inline-flex max-w-full items-center gap-1 text-[10px]", CLASSIFICATION_STYLES[vote.classification] || "")}
+        >
+          <span className="min-w-0 truncate">
+            {publicVoteClassificationLabel(vote.classification)}
+          </span>
+        </Badge>
+      ),
+    },
+    {
+      id: "severidade",
+      header: "Severidade",
+      sortable: true,
+      sortValue: (vote) => severityLabel(vote.severity),
+      className: "w-[110px]",
+      headerClassName: "w-[110px]",
+      cell: (vote) => (
+        <Badge
+          variant="outline"
+          className={cn("inline-flex max-w-full items-center gap-1 text-[10px]", SEVERITY_STYLES[vote.severity] || "")}
+        >
+          <span className="min-w-0 truncate">{severityLabel(vote.severity)}</span>
+        </Badge>
+      ),
+    },
+    {
+      id: "impacto",
+      header: "Impacto",
+      sortable: true,
+      sortValue: (vote) => vote.scoreDelta,
+      className: "w-[82px]",
+      headerClassName: "w-[82px]",
+      cell: (vote) => (
+        <span
+          className={cn(
+            "text-xs font-semibold tabular-nums",
+            vote.scoreDelta < 0
+              ? "text-red-700 dark:text-red-400"
+              : vote.scoreDelta > 0
+                ? "text-emerald-700 dark:text-emerald-400"
+                : "text-muted-foreground",
+          )}
+        >
+          {vote.scoreDelta > 0 ? "+" : ""}{formatDecimal(vote.scoreDelta)}
+        </span>
+      ),
+    },
+    {
+      id: "data",
+      header: "Data",
+      sortable: true,
+      sortValue: (vote) => vote.date,
+      className: "w-[82px]",
+      headerClassName: "w-[82px]",
+      cell: (vote) => (
+        <span className="text-xs text-muted-foreground">{formatDate(vote.date)}</span>
+      ),
+    },
+  ]
 
   return (
     <>
-      <VoteVoteList data={data} onOpenSheet={openSheet} classificationFilter={classificationFilter} />
+      <DataTable
+        columns={columns}
+        data={data}
+        keyFn={(vote, idx) => `${vote.voteId}-${vote.candidateVote}-${idx}`}
+        searchable
+        searchPlaceholder="Buscar por descrição ou resumo..."
+        searchFields={[
+          (vote) => vote.description,
+          (vote) => vote.summary ?? "",
+          (vote) => vote.voteId,
+          (vote) => vote.reason,
+        ]}
+        filters={filters}
+        emptyMessage="Nenhuma votação nominal encontrada no período."
+        tableClassName="table-fixed"
+      />
       <VoteDetailSheet vote={selected} open={sheetOpen} onOpenChange={setSheetOpen} />
     </>
   )

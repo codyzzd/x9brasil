@@ -21,7 +21,9 @@ export type ScoreBand = "low" | "medium" | "good" | "unavailable";
 export type RawMetrics = {
   monthsInOffice: number;
   plenaryAttendances: number | null;
+  plenarySessionsTotal?: number | null;
   nominalVotes: number | null;
+  nominalVotesTotal?: number | null;
   substantiveProposals: number | null;
   oversightProposals: number | null;
   advancedProposals: number | null;
@@ -154,7 +156,7 @@ export type ProfilePeriodDetails = {
     classification: string;
     severity: string;
     scoreDelta: number;
-    confidence: number;
+    confidence: number | null;
     reason: string;
     source: string;
     reviewedManually: boolean;

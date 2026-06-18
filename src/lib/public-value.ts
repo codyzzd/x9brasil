@@ -26,6 +26,7 @@ export const PUBLIC_VALUE_CATEGORIES = {
 
 export type PublicValueCategory = keyof typeof PUBLIC_VALUE_CATEGORIES;
 export type ClassificationConfidence = "high" | "medium" | "low";
+export type ClassificationSource = "reviewed" | "rule" | "llm";
 export type ProposalStage = "presented" | "advanced" | "converted";
 
 export type ParticipationRole = "AUTHOR" | "COAUTHOR" | "REQUESTER" | "FISCALIZATION" | "SIGNATORY" | "UNKNOWN";
@@ -84,7 +85,8 @@ export type ProposalClassification = {
   category: PublicValueCategory;
   confidence: ClassificationConfidence;
   justification: string;
-  source: "reviewed" | "rule";
+  source: ClassificationSource;
+  analysisLevel: 1 | 2 | 3;
   methodologyVersion: string;
 };
 
@@ -98,7 +100,8 @@ export type PublicVoteAnalysis = {
   publicInterestVote: PublicInterestVote;
   confidence: number;
   reason: string;
-  source: "reviewed" | "rule";
+  source: ClassificationSource;
+  analysisLevel: 1 | 2 | 3;
   reviewedManually: boolean;
   methodologyVersion: string;
 };
@@ -237,6 +240,7 @@ export function classifyProposal(
     confidence: "high",
     justification: matches[0].justification,
     source: "rule",
+    analysisLevel: 1,
     methodologyVersion: METHODOLOGY_VERSION,
   };
 }
@@ -446,13 +450,14 @@ function publicVoteRule(
   voteId: string,
   analysis: Omit<
     PublicVoteAnalysis,
-    "voteId" | "source" | "reviewedManually" | "methodologyVersion"
+    "voteId" | "source" | "analysisLevel" | "reviewedManually" | "methodologyVersion"
   >,
 ): PublicVoteAnalysis {
   return {
     voteId,
     ...analysis,
     source: "rule",
+    analysisLevel: 1,
     reviewedManually: false,
     methodologyVersion: VOTE_METHODOLOGY_VERSION,
   };

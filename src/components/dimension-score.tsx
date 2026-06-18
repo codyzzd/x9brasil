@@ -20,39 +20,100 @@ export function DimensionScore({
   label,
   value,
   compact = false,
+  compactBar = false,
+  dense = false,
   explanation,
   index = "current",
 }: {
   label: string;
   value: number | null;
   compact?: boolean;
+  compactBar?: boolean;
+  dense?: boolean;
   explanation?: DimensionExplanation;
   index?: RankingIndex;
 }) {
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const style = scoreStyle(value, index);
+  const semanticLabel =
+    value === null
+      ? null
+      : index === "public-value"
+        ? publicValueScoreLabel(value)
+        : scoreLabel(value);
 
-  const content = (
-    <div className={cn("space-y-1.5", compact && "min-w-20")}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs text-muted-foreground">{label}</span>
-        <span className={cn("flex items-center gap-1.5 text-xs font-semibold tabular-nums", style.text)}>
+  const content = compact ? (
+    compactBar ? (
+      <div className="min-w-0 space-y-1.5">
+        <span
+          className={cn(
+            "block text-center text-sm font-semibold tabular-nums",
+            style.text,
+          )}
+        >
           {value === null ? "N/D" : value}
-          {!compact && value !== null && (
-            <span className="font-medium">
-              ·{" "}
-              {index === "public-value"
-                ? publicValueScoreLabel(value)
-                : scoreLabel(value)}
-            </span>
+        </span>
+        <Progress
+          value={value ?? 0}
+          className="h-1.5 w-full"
+          indicatorClassName={style.indicator}
+        />
+      </div>
+    ) : (
+      <span
+        className={cn(
+          "block text-center text-sm font-semibold tabular-nums",
+          style.text,
+        )}
+      >
+        {value === null ? "N/D" : value}
+      </span>
+    )
+  ) : (
+    <div className={cn("min-w-0 space-y-1.5", dense && "space-y-1")}>
+      <div
+        className={cn(
+          "flex min-w-0 items-center justify-between gap-2",
+          dense && "flex-col items-start justify-start gap-0.5",
+        )}
+      >
+        <span
+          className={cn(
+            "min-w-0 text-xs text-muted-foreground",
+            dense && "w-full truncate text-[11px] leading-4",
+          )}
+        >
+          {label}
+        </span>
+        <span
+          className={cn(
+            "flex min-w-0 items-center gap-1.5 text-xs font-semibold tabular-nums",
+            dense && "w-full gap-1 overflow-hidden whitespace-nowrap text-[11px] leading-4",
+            style.text,
+          )}
+        >
+          {dense ? (
+            value === null ? (
+              "N/D"
+            ) : (
+              <>
+                <span className="shrink-0">{value}</span>
+                <span className="min-w-0 truncate font-medium">
+                  · {semanticLabel}
+                </span>
+              </>
+            )
+          ) : (
+            <>
+              {value === null ? "N/D" : value}
+              {semanticLabel && (
+                <span className="truncate font-medium">· {semanticLabel}</span>
+              )}
+            </>
           )}
         </span>
       </div>
-      <Progress
-        value={value ?? 0}
-        className={cn(compact && "h-1.5")}
-        indicatorClassName={style.indicator}
-      />
+      <Progress value={value ?? 0} indicatorClassName={style.indicator} />
     </div>
   );
 

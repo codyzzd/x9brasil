@@ -87,6 +87,7 @@ test("does not penalize low-confidence public vote analysis", () => {
       confidence: 0.5,
       reason: "Impacto pouco claro.",
       source: "reviewed",
+      analysisLevel: 2,
       reviewedManually: true,
       methodologyVersion: "test",
     },

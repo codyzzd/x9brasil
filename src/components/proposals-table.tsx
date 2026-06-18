@@ -314,7 +314,8 @@ export function ProposalsTable({ proposals }: { proposals: Proposal[] }) {
       header: "Proposição",
       sortable: true,
       sortValue: (p) => `${p.type} ${p.number}${p.year} ${p.summary}`,
-      className: "min-w-[220px] flex-1",
+      className: "w-[34%] whitespace-normal",
+      headerClassName: "w-[34%]",
       cell: (p) => (
         <div>
           <button
@@ -343,15 +344,15 @@ export function ProposalsTable({ proposals }: { proposals: Proposal[] }) {
       header: "Tipo",
       sortable: true,
       sortValue: (p) => p.proposalNatureLabel,
-      className: "w-[110px]",
-      headerClassName: "w-[110px]",
+      className: "w-[86px]",
+      headerClassName: "w-[86px]",
       cell: (p) => (
         <Badge
           variant="outline"
-          className={cn("inline-flex items-center gap-1 text-[10px]", NATURE_STYLES[p.proposalNature] || "")}
+          className={cn("inline-flex max-w-full items-center gap-1 text-[10px]", NATURE_STYLES[p.proposalNature] || "")}
         >
           {NATURE_ICONS[p.proposalNature]}
-          {p.proposalNatureLabel}
+          <span className="min-w-0 truncate">{p.proposalNatureLabel}</span>
         </Badge>
       ),
     },
@@ -360,15 +361,15 @@ export function ProposalsTable({ proposals }: { proposals: Proposal[] }) {
       header: "Papel",
       sortable: true,
       sortValue: (p) => p.participationLabel,
-      className: "w-[100px]",
-      headerClassName: "w-[100px]",
+      className: "w-[112px]",
+      headerClassName: "w-[112px]",
       cell: (p) => (
         <Badge
           variant="outline"
-          className={cn("inline-flex items-center gap-1 text-[10px]", ROLE_STYLES[p.participationRole] || "")}
+          className={cn("inline-flex max-w-full items-center gap-1 text-[10px]", ROLE_STYLES[p.participationRole] || "")}
         >
           {ROLE_ICONS[p.participationRole]}
-          {p.participationLabel}
+          <span className="min-w-0 truncate">{p.participationLabel}</span>
         </Badge>
       ),
     },
@@ -377,8 +378,8 @@ export function ProposalsTable({ proposals }: { proposals: Proposal[] }) {
       header: "Classificação",
       sortable: true,
       sortValue: (p) => p.publicValue?.points ?? 0,
-      className: "w-[160px]",
-      headerClassName: "w-[160px]",
+      className: "w-[150px] whitespace-normal",
+      headerClassName: "w-[150px]",
       cell: (p) =>
         p.publicValue ? (
           <div className="space-y-1">
@@ -394,10 +395,10 @@ export function ProposalsTable({ proposals }: { proposals: Proposal[] }) {
             <div className="flex items-center gap-1">
               <Badge
                 variant="outline"
-                className={cn("inline-flex items-center gap-1 text-[10px]", labelStyle(p.publicValue.category))}
+                className={cn("inline-flex max-w-[126px] items-center gap-1 text-[10px]", labelStyle(p.publicValue.category))}
               >
                 <Sparkles className="size-3" />
-                {p.publicValue.categoryLabel}
+                <span className="min-w-0 truncate">{p.publicValue.categoryLabel}</span>
               </Badge>
               <Tooltip>
                 <TooltipTrigger className="inline-flex items-center justify-center size-4 rounded-full hover:bg-muted transition-colors">
@@ -421,17 +422,17 @@ export function ProposalsTable({ proposals }: { proposals: Proposal[] }) {
       header: "Status",
       sortable: true,
       sortValue: (p) => p.status,
-      className: "w-[160px]",
-      headerClassName: "w-[160px]",
-      cell: (p) => <span className="line-clamp-1 text-xs">{p.status}</span>,
+      className: "w-[120px] whitespace-normal",
+      headerClassName: "w-[120px]",
+      cell: (p) => <span className="block truncate text-xs">{p.status}</span>,
     },
     {
       id: "data",
       header: "Data",
       sortable: true,
       sortValue: (p) => p.date,
-      className: "w-[100px]",
-      headerClassName: "w-[100px]",
+      className: "w-[82px]",
+      headerClassName: "w-[82px]",
       cell: (p) => (
         <span className="text-xs text-muted-foreground">{formatDate(p.date)}</span>
       ),
@@ -455,6 +456,7 @@ export function ProposalsTable({ proposals }: { proposals: Proposal[] }) {
         ]}
         filters={filters}
         emptyMessage="Nenhuma proposição encontrada no período."
+        tableClassName="table-fixed"
       />
       <ProposalSheet
         proposal={selected}

@@ -7,7 +7,7 @@ import { SiteHeader } from "@/components/site-header";
 export const metadata: Metadata = {
   title: "Metodologia",
   description:
-    "Como são calculados o Índice atual e o Valor Público dos deputados federais no Score Brasil.",
+    "Como o Score Brasil calcula o Valor Público dos deputados federais.",
 };
 
 export default function MethodologyPage() {
@@ -19,14 +19,13 @@ export default function MethodologyPage() {
           <p className="text-sm font-medium text-muted-foreground">
             Metodologia
           </p>
-          <h1 className="mt-2 text-4xl font-bold tracking-tight text-balance">
-            Como os dois índices são calculados
+          <h1 className="mt-2 text-4xl font-bold text-balance">
+            Como o Valor Público é calculado
           </h1>
           <p className="mt-5 text-lg leading-8 text-muted-foreground text-pretty">
-            O ranking oferece o Índice atual, que compara atividade
-            parlamentar, recursos e transparência, e o Valor Público, um
-            índice experimental que dá mais peso à contribuição das
-            proposições. Os dois resultados vão de 0 a 100.
+            Uma leitura auditável do trabalho parlamentar: o que foi proposto,
+            como o deputado votou, quanto recurso usou e qual parte da base já
+            foi analisada. A nota vai de 0 a 100.
           </p>
 
           <div className="mt-8">

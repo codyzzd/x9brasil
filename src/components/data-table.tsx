@@ -51,6 +51,7 @@ export type DataTableProps<T> = {
   filters?: FilterDef<T>[]
   emptyMessage?: string
   itemsPerPage?: number
+  tableClassName?: string
 }
 
 export function DataTable<T>({
@@ -63,6 +64,7 @@ export function DataTable<T>({
   filters = [],
   emptyMessage = "Nenhum registro encontrado.",
   itemsPerPage = DEFAULT_ITEMS_PER_PAGE,
+  tableClassName,
 }: DataTableProps<T>) {
   const [search, setSearch] = useState("")
   const [page, setPage] = useState(0)
@@ -155,30 +157,34 @@ export function DataTable<T>({
               />
             </div>
           )}
-          {filters.map((filter) => (
-            <Select
-              key={filter.id}
-              value={activeFilters[filter.id] || ""}
-              onValueChange={(value) => handleFilterChange(filter.id, value ?? "")}
-            >
-              <SelectTrigger className="w-auto min-w-36">
-                <SelectValue placeholder={filter.label} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">Todas</SelectItem>
-                {filter.options.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ))}
+          {filters.map((filter) => {
+            const filterOptions = [{ value: "", label: "Todas" }, ...filter.options]
+
+            return (
+              <Select
+                key={filter.id}
+                value={activeFilters[filter.id] || ""}
+                items={filterOptions}
+                onValueChange={(value) => handleFilterChange(filter.id, value ?? "")}
+              >
+                <SelectTrigger className="w-auto min-w-36">
+                  <SelectValue placeholder={filter.label} />
+                </SelectTrigger>
+                <SelectContent>
+                  {filterOptions.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )
+          })}
         </div>
       )}
 
       <div className="overflow-x-auto rounded-lg border">
-        <Table>
+        <Table className={tableClassName}>
           <TableHeader>
             <TableRow>
               {columns.map((col) => (

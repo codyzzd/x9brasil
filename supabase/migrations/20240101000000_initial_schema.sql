@@ -76,7 +76,9 @@ CREATE TABLE legislator_period_metrics (
   days_in_office INTEGER NOT NULL,
   months_in_office NUMERIC NOT NULL,
   plenary_attendances INTEGER,
+  plenary_sessions_total INTEGER,
   nominal_votes INTEGER,
+  nominal_votes_total INTEGER,
   substantive_proposals INTEGER,
   oversight_proposals INTEGER,
   advanced_proposals INTEGER,
@@ -189,6 +191,7 @@ CREATE TABLE proposal_classifications (
   confidence TEXT NOT NULL CHECK (confidence IN ('high', 'medium', 'low')),
   justification TEXT,
   source TEXT NOT NULL DEFAULT 'rule' CHECK (source IN ('reviewed', 'rule', 'llm')),
+  analysis_level INTEGER NOT NULL DEFAULT 1 CHECK (analysis_level IN (1, 2, 3)),
   methodology_version TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -217,6 +220,7 @@ CREATE TABLE vote_classifications (
   confidence NUMERIC NOT NULL DEFAULT 0,
   reason TEXT,
   source TEXT NOT NULL DEFAULT 'rule' CHECK (source IN ('reviewed', 'rule', 'llm')),
+  analysis_level INTEGER NOT NULL DEFAULT 1 CHECK (analysis_level IN (1, 2, 3)),
   reviewed_manually BOOLEAN NOT NULL DEFAULT FALSE,
   methodology_version TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -292,8 +296,10 @@ CREATE INDEX idx_legislator_period_suppliers_lp ON legislator_period_suppliers(l
 CREATE INDEX idx_legislator_period_largest_expenses_lp ON legislator_period_largest_expenses(legislator_id, period_id);
 CREATE INDEX idx_legislator_proposals_lp ON legislator_proposals(legislator_id, period_id);
 CREATE INDEX idx_proposal_classifications_proposal ON proposal_classifications(proposal_id);
+CREATE INDEX idx_proposal_classifications_level ON proposal_classifications(analysis_level);
 CREATE INDEX idx_legislator_votes_lp ON legislator_votes(legislator_id, period_id);
 CREATE INDEX idx_vote_classifications_vote ON vote_classifications(vote_id);
+CREATE INDEX idx_vote_classifications_level ON vote_classifications(analysis_level);
 CREATE INDEX idx_legislator_amendments_lp ON legislator_amendments(legislator_id, period_id);
 CREATE INDEX idx_legislator_assets_legislator ON legislator_assets(legislator_id);
 CREATE INDEX idx_legislator_staff_legislator ON legislator_staff(legislator_id);

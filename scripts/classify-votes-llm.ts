@@ -42,6 +42,8 @@ interface VoteClassification {
   publicInterestVote: "yes" | "no" | "any" | "none";
   confidence: number;
   reason: string;
+  source?: string;
+  analysisLevel?: number;
 }
 
 interface ClassificationsFile {
@@ -301,6 +303,8 @@ export async function classifyVotes(
         publicInterestVote: parsedResult.publicInterestVote,
         confidence: parsedResult.confidence || 0.8,
         reason: parsedResult.reason || "Classificado via IA.",
+        source: "llm",
+        analysisLevel: mode === "advanced" ? 3 : 2,
       };
 
       await writeFile(classificationsPath, `${JSON.stringify(classificationsData, null, 2)}\n`);

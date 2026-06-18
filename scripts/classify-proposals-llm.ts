@@ -43,6 +43,8 @@ interface ProposalClassification {
   category: string;
   confidence: string;
   justification: string;
+  source?: string;
+  analysisLevel?: number;
 }
 
 interface ClassificationsFile {
@@ -343,6 +345,8 @@ export async function classifyProposals(
         category: parsedResult.category,
         confidence: parsedResult.confidence,
         justification: parsedResult.justification,
+        source: "llm",
+        analysisLevel: mode === "advanced" ? 3 : 2,
       };
 
       await writeFile(classificationsPath, `${JSON.stringify(classificationsData, null, 2)}\n`);

@@ -38,11 +38,13 @@ export function SemanticScore({
         >
           {value ?? "—"}
         </p>
-        <p className={cn("mt-1 text-xs font-medium", style.text)}>
-          {index === "public-value"
-            ? publicValueScoreLabel(value)
-            : scoreLabel(value)}
-        </p>
+        {!compact && (
+          <p className={cn("mt-1 text-xs font-medium", style.text)}>
+            {index === "public-value"
+              ? publicValueScoreLabel(value)
+              : scoreLabel(value)}
+          </p>
+        )}
       </div>
     </div>
   );

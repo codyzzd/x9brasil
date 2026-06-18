@@ -4,7 +4,6 @@ import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowDown,
-  ArrowRight,
   ArrowUp,
   ArrowUpDown,
   Minus,
@@ -26,7 +25,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -36,7 +34,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  formatCurrency,
   type PublicValueRankedDeputy,
   type RankChange,
   type RankedDeputy,
@@ -153,12 +150,11 @@ export function RankingTable({
                 onOrderChange={onOrderChange}
                 centered
               />
-              <TableHead className="w-28" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {deputies.map((deputy) => (
-              <TableRow key={deputy.id}>
+              <TableRow key={deputy.id} className="group">
                 <TableCell className="text-center">
                   <p className="text-xl font-semibold tabular-nums">
                     {deputy.rank ?? "—"}
@@ -166,7 +162,11 @@ export function RankingTable({
                   <RankTrend change={rankChanges.get(deputy.id)} compact />
                 </TableCell>
                 <TableCell>
-                  <DeputyIdentity deputy={deputy} compact />
+                  <DeputyIdentity
+                    deputy={deputy}
+                    href={`/candidatos/${deputy.slug}${contextQuery}`}
+                    compact
+                  />
                 </TableCell>
                 <TableCell>
                   <DimensionScore
@@ -179,6 +179,7 @@ export function RankingTable({
                     )}
                     index={index}
                     compact
+                    compactBar
                   />
                 </TableCell>
                 <TableCell>
@@ -195,6 +196,7 @@ export function RankingTable({
                       )}
                       index={index}
                       compact
+                      compactBar
                     />
                   ) : (
                     <DimensionScore
@@ -207,6 +209,7 @@ export function RankingTable({
                       )}
                       index={index}
                       compact
+                      compactBar
                     />
                   )}
                 </TableCell>
@@ -225,6 +228,7 @@ export function RankingTable({
                     )}
                     index={index}
                     compact
+                    compactBar
                   />
                 </TableCell>
                 {index === "public-value" && (
@@ -239,6 +243,7 @@ export function RankingTable({
                       )}
                       index={index}
                       compact
+                      compactBar
                     />
                   </TableCell>
                 )}
@@ -253,18 +258,11 @@ export function RankingTable({
                     )}
                     index={index}
                     compact
+                    compactBar
                   />
                 </TableCell>
                 <TableCell className="text-center">
                   <SemanticScore value={deputy.score} index={index} compact />
-                </TableCell>
-                <TableCell>
-                  <Link
-                    href={`/candidatos/${deputy.slug}${contextQuery}`}
-                    className={buttonVariants({ variant: "outline", size: "sm" })}
-                  >
-                    Perfil <ArrowRight className="size-3.5" />
-                  </Link>
                 </TableCell>
               </TableRow>
             ))}
@@ -283,14 +281,22 @@ export function RankingTable({
                 {deputy.rank ?? "—"}
               </p>
               <div className="min-w-0 flex-1">
-                <DeputyIdentity deputy={deputy} />
+                <DeputyIdentity
+                  deputy={deputy}
+                  href={`/candidatos/${deputy.slug}${contextQuery}`}
+                />
               </div>
               <SemanticScore value={deputy.score} index={index} compact />
             </div>
             <div className="mt-3 pl-11">
               <RankTrend change={rankChanges.get(deputy.id)} />
             </div>
-            <div className="mt-5 grid grid-cols-2 gap-4">
+            <div
+              className={cn(
+                "mt-5 grid gap-3 max-[520px]:gap-2",
+                index === "public-value" ? "grid-cols-5" : "grid-cols-4",
+              )}
+            >
               <DimensionScore
                 label="Participação"
                 value={deputy.dimensions.participation}
@@ -300,6 +306,7 @@ export function RankingTable({
                   "participation",
                 )}
                 index={index}
+                dense
               />
               <DimensionScore
                 label={index === "public-value" ? "Contribuição" : "Produção"}
@@ -314,6 +321,7 @@ export function RankingTable({
                   index === "public-value" ? "contribution" : "production",
                 )}
                 index={index}
+                dense
               />
               <DimensionScore
                 label={index === "public-value" ? "Eficiência" : "Recursos"}
@@ -328,6 +336,7 @@ export function RankingTable({
                   index === "public-value" ? "efficiency" : "resources",
                 )}
                 index={index}
+                dense
               />
               {index === "public-value" && (
                 <DimensionScore
@@ -339,6 +348,7 @@ export function RankingTable({
                     "publicVotes",
                   )}
                   index={index}
+                  dense
                 />
               )}
               <DimensionScore
@@ -350,17 +360,9 @@ export function RankingTable({
                   "campaignFinance",
                 )}
                 index={index}
+                dense
               />
             </div>
-            <Link
-              href={`/candidatos/${deputy.slug}${contextQuery}`}
-              className={cn(
-                buttonVariants({ variant: "outline" }),
-                "mt-5 w-full active:scale-[0.96] transition-transform",
-              )}
-            >
-              Ver perfil completo <ArrowRight className="size-4" />
-            </Link>
           </article>
         ))}
       </div>
@@ -463,13 +465,18 @@ function RankTrend({
 
 function DeputyIdentity({
   deputy,
+  href,
   compact = false,
 }: {
   deputy: RankedDeputy | PublicValueRankedDeputy;
+  href: string;
   compact?: boolean;
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-3">
+    <Link
+      href={href}
+      className="flex min-w-0 items-center gap-3 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
       <div className="relative size-12 shrink-0 overflow-hidden rounded-full bg-muted outline outline-1 -outline-offset-1 outline-black/10">
         <Image
           src={deputy.photoUrl}
@@ -480,7 +487,9 @@ function DeputyIdentity({
         />
       </div>
       <div className="min-w-0">
-        <p className="truncate font-semibold">{deputy.name}</p>
+        <p className="truncate font-semibold group-hover:underline">
+          {deputy.name}
+        </p>
         <p className="text-sm text-muted-foreground">
           {deputy.party} · {deputy.state}
           {deputy.electionNumber ? ` · ${deputy.electionNumber}` : ""}
@@ -501,7 +510,7 @@ function DeputyIdentity({
           )}
         </div>
       </div>
-    </div>
+    </Link>
   );
 }
 

@@ -6,9 +6,15 @@ import {
   ArrowLeft,
   ArrowDown,
   ArrowUp,
+  BriefcaseBusiness,
+  CalendarDays,
   ExternalLink,
   FileCheck2,
   GitCompareArrows,
+  GraduationCap,
+  Hash,
+  MapPin,
+  type LucideIcon,
 } from "lucide-react";
 import { CandidatePeriodSelect } from "@/components/candidate-period-select";
 import { DimensionScore } from "@/components/dimension-score";
@@ -177,33 +183,37 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
             />
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-            <Card>
-              <CardContent className="flex flex-col gap-5 sm:flex-row sm:items-center">
-                <div className="relative size-28 shrink-0 overflow-hidden rounded-xl bg-muted outline outline-1 -outline-offset-1 outline-black/10">
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <Card className="min-h-64">
+              <CardContent className="grid h-full gap-5 py-5 sm:grid-cols-[128px_minmax(0,1fr)]">
+                <div className="relative size-32 shrink-0 overflow-hidden rounded-xl bg-muted outline outline-1 -outline-offset-1 outline-black/10">
                   <Image
                     src={ranked.photoUrl}
                     alt={`Foto oficial de ${ranked.name}`}
                     fill
                     priority
-                    sizes="112px"
+                    sizes="128px"
                     className="object-cover object-top"
                   />
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="mb-2 flex flex-wrap gap-2">
-                    <Badge>{ranked.party}</Badge>
-                    <Badge variant="outline">{ranked.state}</Badge>
+                <div className="flex min-w-0 flex-col">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge className="h-6 px-2.5">{ranked.party}</Badge>
+                    <Badge variant="outline" className="h-6 px-2.5">
+                      {ranked.state}
+                    </Badge>
                     {ranked.electionStatus && (
-                      <Badge variant="secondary">{ranked.electionStatus}</Badge>
+                      <Badge variant="secondary" className="h-6 px-2.5">
+                        {ranked.electionStatus}
+                      </Badge>
                     )}
                     {candidateStyle && (
-                      <Badge className="border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-900 dark:bg-purple-950/30 dark:text-purple-400">
+                      <Badge className="h-6 border-purple-200 bg-purple-50 px-2.5 text-purple-700 dark:border-purple-900 dark:bg-purple-950/30 dark:text-purple-400">
                         {candidateStyle.label}
                       </Badge>
                     )}
                   </div>
-                  <h1 className="text-3xl font-bold tracking-tight text-balance">
+                  <h1 className="mt-3 text-3xl font-bold tracking-tight text-balance sm:text-4xl">
                     {ranked.name}
                   </h1>
                   <p className="mt-0.5 text-sm text-muted-foreground">{ranked.civilName}</p>
@@ -222,17 +232,39 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                       ))}
                     </div>
                   )}
-                  <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+                  <div className="mt-6 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
                     {identityDetails?.birthPlace && (
-                      <span>{identityDetails.birthPlace}</span>
+                      <ProfileFact
+                        icon={MapPin}
+                        label="Base eleitoral"
+                        value={identityDetails.birthPlace}
+                      />
                     )}
                     {identityDetails?.education && (
-                      <span>{identityDetails.education}</span>
+                      <ProfileFact
+                        icon={GraduationCap}
+                        label="Escolaridade"
+                        value={identityDetails.education}
+                      />
                     )}
-                    {identityDetails?.office && <span>{identityDetails.office}</span>}
-                    <span>Desde {formatDate(ranked.officeStart)}</span>
+                    {identityDetails?.office && (
+                      <ProfileFact
+                        icon={BriefcaseBusiness}
+                        label="Gabinete"
+                        value={identityDetails.office}
+                      />
+                    )}
+                    <ProfileFact
+                      icon={CalendarDays}
+                      label="Mandato atual"
+                      value={`Desde ${formatDate(ranked.officeStart)}`}
+                    />
                     {ranked.electionNumber && (
-                      <span>Nº {ranked.electionNumber}</span>
+                      <ProfileFact
+                        icon={Hash}
+                        label="Número eleitoral"
+                        value={ranked.electionNumber}
+                      />
                     )}
                   </div>
                 </div>
@@ -240,72 +272,67 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
             </Card>
 
             <Card>
-              <CardContent className="space-y-3 py-4">
-                <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start">
-                  <div className="flex flex-col items-center gap-1 lg:min-w-28">
-                    {(() => {
-                      const style = scoreStyle(ranked.score, index);
-                      return (
-                        <>
-                          <p className="text-xs text-muted-foreground">
+              <CardContent className="space-y-4 py-5">
+                {(() => {
+                  const style = scoreStyle(ranked.score, index);
+                  return (
+                    <div className={cn("rounded-xl border p-4", style.soft, style.border)}>
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground">
                             {ranked.rank
                               ? `${ranked.rank}º no Brasil`
                               : "Sem posição"}
                           </p>
-                          <div className={cn("flex flex-col items-center rounded-lg border px-4 py-2", style.soft, style.border)}>
-                            <span className={cn("text-2xl font-bold tabular-nums leading-none lg:text-3xl", style.text)}>
-                              {ranked.score ?? "—"}
-                            </span>
-                            <span className={cn("mt-0.5 text-xs font-medium", style.text)}>
-                              {publicValueScoreLabel(ranked.score)}
-                            </span>
-                          </div>
                           <ProfileRankTrend change={rankChange} />
-                        </>
-                      );
-                    })()}
-                  </div>
+                        </div>
+                        <div className="text-right">
+                          <span className={cn("block text-5xl font-bold leading-none tabular-nums", style.text)}>
+                            {ranked.score ?? "—"}
+                          </span>
+                          <span className={cn("mt-1 block text-sm font-semibold", style.text)}>
+                            {publicValueScoreLabel(ranked.score)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
-                  <div className="flex-1 space-y-1 self-stretch">
-                    <DimensionScore
-                      label="Contribuição pública"
-                      value={profileDimension(ranked, "contribution")}
-                      explanation={dimensionExplanation(ranked, index, "contribution")}
-                      index={index}
-                      compact
-                    />
-                    <DimensionScore
-                      label="Votos públicos"
-                      value={profileDimension(ranked, "publicVotes")}
-                      explanation={dimensionExplanation(ranked, index, "publicVotes")}
-                      index={index}
-                      compact
-                    />
-                    <DimensionScore
-                      label="Eficiência financeira"
-                      value={profileDimension(ranked, "efficiency")}
-                      explanation={dimensionExplanation(ranked, index, "efficiency")}
-                      index={index}
-                      compact
-                    />
-                    <DimensionScore
-                      label="Participação"
-                      value={ranked.dimensions.participation}
-                      explanation={dimensionExplanation(ranked, index, "participation")}
-                      index={index}
-                      compact
-                    />
-                    <DimensionScore
-                      label="Finanças de campanha"
-                      value={ranked.dimensions.campaignFinance}
-                      explanation={dimensionExplanation(ranked, index, "campaignFinance")}
-                      index={index}
-                      compact
-                    />
-                  </div>
+                <div className="space-y-3">
+                  <DimensionScore
+                    label="Contribuição pública"
+                    value={profileDimension(ranked, "contribution")}
+                    explanation={dimensionExplanation(ranked, index, "contribution")}
+                    index={index}
+                  />
+                  <DimensionScore
+                    label="Votos públicos"
+                    value={profileDimension(ranked, "publicVotes")}
+                    explanation={dimensionExplanation(ranked, index, "publicVotes")}
+                    index={index}
+                  />
+                  <DimensionScore
+                    label="Eficiência financeira"
+                    value={profileDimension(ranked, "efficiency")}
+                    explanation={dimensionExplanation(ranked, index, "efficiency")}
+                    index={index}
+                  />
+                  <DimensionScore
+                    label="Participação"
+                    value={ranked.dimensions.participation}
+                    explanation={dimensionExplanation(ranked, index, "participation")}
+                    index={index}
+                  />
+                  <DimensionScore
+                    label="Finanças de campanha"
+                    value={ranked.dimensions.campaignFinance}
+                    explanation={dimensionExplanation(ranked, index, "campaignFinance")}
+                    index={index}
+                  />
                 </div>
 
-                <p className="rounded-md bg-muted p-2 text-xs leading-5 text-muted-foreground">
+                <p className="rounded-lg bg-muted/60 p-3 text-xs leading-5 text-muted-foreground">
                     {ranked.metrics.publicClassifiedProposals || 0} de{" "}
                     {ranked.metrics.publicTotalProposals || 0} proposições
                     classificadas. Revisado em{" "}
@@ -315,13 +342,14 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                 <div className="flex gap-2">
                   <Link
                     href={`/comparar?a=${encodeURIComponent(ranked.slug)}&periodo=${encodeURIComponent(period.id)}`}
-                    className={cn(buttonVariants({ variant: "outline", size: "sm" }), "flex-1")}
+                    className={cn(buttonVariants({ variant: "outline" }), "flex-1")}
                   >
                     <GitCompareArrows className="size-3.5" /> Comparar
                   </Link>
                   <Link
                     href="/metodologia"
-                    className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "px-3")}
+                    className={cn(buttonVariants({ variant: "ghost", size: "icon" }))}
+                    aria-label="Ver metodologia"
                   >
                     <FileCheck2 className="size-4" />
                   </Link>
@@ -357,7 +385,7 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                     </CardHeader>
                     <CardContent>
                       <ParticipationBar metrics={ranked.metrics} />
-                      <div className="mt-6 grid gap-4 sm:grid-cols-3">
+                      <div className="mt-6 grid gap-4 sm:grid-cols-2">
                         <MetricCard
                           label="Propostas que avançaram"
                           value={ranked.metrics.advancedProposals}
@@ -367,11 +395,6 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                           label="Transformadas em norma"
                           value={ranked.metrics.convertedProposals}
                           detail="Resultado adicional, não atribuição exclusiva"
-                        />
-                        <MetricCard
-                          label="Votos nominais"
-                          value={ranked.metrics.nominalVotes}
-                          detail="Votos individuais registrados"
                         />
                       </div>
                     </CardContent>
@@ -441,7 +464,7 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                     <CardHeader>
                       <CardTitle className="text-lg">Votos públicos registrados</CardTitle>
                       <CardDescription>
-                        Votações nominais classificadas e seus impactos no score. Use a busca para filtrar por descrição.
+                        Todas as votações nominais capturadas no período. Apenas as analisadas pela metodologia impactam o score.
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -453,7 +476,7 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                           </div>
                         </>
                       ) : (
-                        <EmptyData text="Nenhuma votação classificada entrou no cálculo deste período." />
+                        <EmptyData text="Nenhuma votação nominal encontrada no período." />
                       )}
                     </CardContent>
                   </Card>
@@ -599,13 +622,21 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                       <div className="grid gap-4 sm:grid-cols-2">
                         <MetricCard
                           label="Sessões deliberativas"
-                          value={ranked.metrics.plenaryAttendances}
-                          detail="Presenças publicadas pela Câmara"
+                          {...participationMetricCard(
+                            ranked.metrics.plenaryAttendances,
+                            ranked.metrics.plenarySessionsTotal,
+                            "de presença",
+                            "falta",
+                          )}
                         />
                         <MetricCard
                           label="Votos nominais"
-                          value={ranked.metrics.nominalVotes}
-                          detail="Votos individuais registrados"
+                          {...participationMetricCard(
+                            ranked.metrics.nominalVotes,
+                            ranked.metrics.nominalVotesTotal,
+                            "registrados",
+                            "ausência",
+                          )}
                         />
                       </div>
                     </CardContent>
@@ -817,6 +848,67 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
   );
 }
 
+function ProfileFact({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      <span className="min-w-0">
+        <span className="block text-[0.68rem] font-medium uppercase text-muted-foreground">
+          {label}
+        </span>
+        <span className="block truncate text-sm font-medium text-foreground">
+          {value}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function participationMetricCard(
+  value: number | null,
+  total: number | null | undefined,
+  rateLabel: string,
+  missingSingular: string,
+) {
+  if (value === null) {
+    return {
+      value: null,
+      detail: "Dados indisponíveis",
+    };
+  }
+
+  if (total === null || total === undefined) {
+    return {
+      value,
+      detail: "total ainda não publicado no snapshot",
+    };
+  }
+
+  if (total <= 0) {
+    return {
+      value,
+      detail: "Total oficial zerado no período",
+    };
+  }
+
+  const safeValue = Math.min(value, total);
+  const missing = Math.max(total - value, 0);
+  const missingLabel = missing === 1 ? missingSingular : `${missingSingular}s`;
+
+  return {
+    value: `${formatInteger(value)} de ${formatInteger(total)}`,
+    detail: `${formatPercent(safeValue / total)} ${rateLabel} · ${formatInteger(missing)} ${missingLabel}`,
+  };
+}
+
 function MetricCard({
   label,
   value,
@@ -835,6 +927,19 @@ function MetricCard({
       <p className="mt-2 text-xs text-muted-foreground">{detail}</p>
     </div>
   );
+}
+
+function formatInteger(value: number) {
+  return new Intl.NumberFormat("pt-BR", {
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatPercent(value: number) {
+  return new Intl.NumberFormat("pt-BR", {
+    maximumFractionDigits: 1,
+    style: "percent",
+  }).format(value);
 }
 
 const ROLE_SEGMENTS: {

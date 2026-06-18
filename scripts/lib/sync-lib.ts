@@ -21,7 +21,6 @@ import {
   PUBLIC_VALUE_CATEGORIES,
   ROLE_WEIGHTS,
   buildPublicVoteRecord,
-  classifyPublicVote,
   classifyProposal,
   getProposalWeight,
   normalizeProposalText,
@@ -365,7 +364,9 @@ export type PeriodAccumulator = {
   partyDays: Map<string, number>;
   stateDays: Map<string, number>;
   plenaryAttendances: Set<string>;
+  plenarySessionsTotal: Set<string>;
   nominalVotes: Set<string>;
+  nominalVotesTotal: Set<string>;
   substantiveProposals: Set<string>;
   oversightProposals: Set<string>;
   advancedProposals: Set<string>;
@@ -414,9 +415,11 @@ export type PeriodAccumulator = {
     transferredValue: number;
   }>;
   publicVotes: Array<PublicVoteProfileRecord>;
+  allPublicVotes: Array<PublicVoteProfileRecord>;
 };
 
-export type PublicVoteProfileRecord = PublicVoteRecord & {
+export type PublicVoteProfileRecord = Omit<PublicVoteRecord, "confidence"> & {
+  confidence: number | null;
   date: string;
   description: string;
   summary: string;
@@ -430,6 +433,15 @@ export type PublicVoteMetadata = {
   summary: string;
   url: string;
   analysis: PublicVoteAnalysis | null;
+};
+
+type ReviewedPublicVoteClassification = Omit<
+  PublicVoteAnalysis,
+  "voteId" | "source" | "reviewedManually" | "methodologyVersion"
+> & {
+  source?: "reviewed" | "rule" | "llm";
+  analysisLevel?: 1 | 2 | 3;
+  reviewedManually?: boolean;
 };
 
 export type DeputyAccumulator = {
@@ -541,7 +553,9 @@ export function emptyPeriod(): PeriodAccumulator {
     partyDays: new Map(),
     stateDays: new Map(),
     plenaryAttendances: new Set(),
+    plenarySessionsTotal: new Set(),
     nominalVotes: new Set(),
+    nominalVotesTotal: new Set(),
     substantiveProposals: new Set(),
     oversightProposals: new Set(),
     advancedProposals: new Set(),
@@ -558,6 +572,7 @@ export function emptyPeriod(): PeriodAccumulator {
     proposals: new Map(),
     amendments: [],
     publicVotes: [],
+    allPublicVotes: [],
   };
 }
 
@@ -839,6 +854,22 @@ export function forDatePeriods(
   }
 }
 
+export function isInExerciseOnDate(accumulator: DeputyAccumulator, date: string | null) {
+  if (!date) return false;
+  return accumulator.intervals.some(
+    (interval) => interval.start <= date && interval.end >= date,
+  );
+}
+
+export function forExerciseDatePeriods(
+  accumulator: DeputyAccumulator,
+  date: string | null,
+  callback: (period: PeriodAccumulator) => void,
+) {
+  if (!isInExerciseOnDate(accumulator, date)) return;
+  forDatePeriods(accumulator, date, callback);
+}
+
 export function addPublicVoteRecord(
   accumulator: DeputyAccumulator,
   vote: PublicVoteMetadata,
@@ -851,33 +882,99 @@ export function addPublicVoteRecord(
     candidateVote,
   );
   forDatePeriods(accumulator, vote.date, (period) => {
-    period.publicVotes.push({
+    const profileRecord = {
       ...record,
       date: vote.date,
       description: truncateText(vote.description, 220),
       summary: truncateText(vote.summary, 350),
       source: vote.url,
       url: vote.url,
+    };
+    period.publicVotes.push(profileRecord);
+    period.allPublicVotes.push(profileRecord);
+  });
+}
+
+export function addUnanalyzedVoteRecord(
+  accumulator: DeputyAccumulator,
+  vote: PublicVoteMetadata,
+  candidateVote: CandidateVote,
+) {
+  forDatePeriods(accumulator, vote.date, (period) => {
+    period.allPublicVotes.push({
+      voteId: vote.id,
+      candidateId: String(accumulator.deputy.id),
+      candidateVote,
+      classification: "unanalyzed",
+      severity: "",
+      scoreDelta: 0,
+      confidence: null,
+      reason: "",
+      source: "",
+      reviewedManually: false,
+      date: vote.date,
+      description: truncateText(vote.description, 220),
+      summary: truncateText(vote.summary, 350),
+      url: vote.url,
     });
   });
 }
 
+function loadReviewedPublicVoteClassifications() {
+  const fileUrl = new URL(
+    "../../.data/public-vote-classifications.json",
+    import.meta.url,
+  );
+  if (!existsSync(fileUrl)) {
+    return new Map<string, PublicVoteAnalysis>();
+  }
+
+  const file = JSON.parse(readFileSync(fileUrl, "utf-8")) as {
+    methodologyVersion?: string;
+    classifications?: Record<string, ReviewedPublicVoteClassification>;
+  };
+  const classifications = new Map<string, PublicVoteAnalysis>();
+  for (const [voteId, classification] of Object.entries(file.classifications ?? {})) {
+    classifications.set(voteId, {
+      voteId,
+      classification: classification.classification,
+      severity: classification.severity,
+      publicInterestVote: classification.publicInterestVote,
+      confidence: classification.confidence,
+      reason: classification.reason,
+      source: classification.source ?? "reviewed",
+      analysisLevel: classification.analysisLevel ?? (classification.source === "rule" ? 1 : 2),
+      reviewedManually: classification.reviewedManually ?? true,
+      methodologyVersion: file.methodologyVersion ?? publicValueClassificationMetadata().methodologyVersion,
+    });
+  }
+  return classifications;
+}
+
 export async function loadParticipation(accumulators: Map<number, DeputyAccumulator>) {
   for (const year of YEARS) {
-    const eligibleEvents = new Set<string>();
+    const eligibleEvents = new Map<string, string>();
     await forEachRemoteCsv(
       `${CHAMBER_FILES}/eventos/csv/eventos-${year}.csv`,
       (row) => {
+        const date = dateOnly(row.dataHoraInicio);
         if (
           row.situacao === "Encerrada" &&
           row.descricaoTipo === "Sessão Deliberativa" &&
-          dateOnly(row.dataHoraInicio) &&
-          dateOnly(row.dataHoraInicio)! <= PERIOD_END
+          date &&
+          date <= PERIOD_END
         ) {
-          eligibleEvents.add(row.id);
+          eligibleEvents.set(row.id, date);
         }
       },
     );
+    for (const [eventId, eventDate] of eligibleEvents) {
+      for (const accumulator of accumulators.values()) {
+        forExerciseDatePeriods(accumulator, eventDate, (period) => {
+          period.plenarySessionsTotal.add(eventId);
+        });
+      }
+    }
     await forEachRemoteCsv(
       `${CHAMBER_FILES}/eventosPresencaDeputados/csv/eventosPresencaDeputados-${year}.csv`,
       (row) => {
@@ -889,21 +986,34 @@ export async function loadParticipation(accumulators: Map<number, DeputyAccumula
         });
       },
     );
+    const eligibleNominalVotes = new Map<string, string>();
     await forEachRemoteCsv(
       `${CHAMBER_FILES}/votacoesVotos/csv/votacoesVotos-${year}.csv`,
       (row) => {
+        const voteDate = dateOnly(row.dataHoraVoto);
+        if (row.idVotacao && voteDate && voteDate <= PERIOD_END) {
+          eligibleNominalVotes.set(row.idVotacao, voteDate);
+        }
         const accumulator = accumulators.get(Number(row.deputado_id));
         if (!accumulator) return;
-        forDatePeriods(accumulator, dateOnly(row.dataHoraVoto), (period) => {
+        forDatePeriods(accumulator, voteDate, (period) => {
           period.nominalVotes.add(row.idVotacao);
         });
       },
     );
+    for (const [voteId, voteDate] of eligibleNominalVotes) {
+      for (const accumulator of accumulators.values()) {
+        forExerciseDatePeriods(accumulator, voteDate, (period) => {
+          period.nominalVotesTotal.add(voteId);
+        });
+      }
+    }
   }
 }
 
 export async function loadPublicVotes(accumulators: Map<number, DeputyAccumulator>) {
   const votes = new Map<string, PublicVoteMetadata>();
+  const reviewedPublicVoteClassifications = loadReviewedPublicVoteClassifications();
   for (const year of YEARS) {
     await forEachRemoteCsv(
       `${CHAMBER_FILES}/votacoes/csv/votacoes-${year}.csv`,
@@ -948,7 +1058,7 @@ export async function loadPublicVotes(accumulators: Map<number, DeputyAccumulato
 
   for (const vote of votes.values()) {
     vote.summary = [...(summaries.get(vote.id) || [])].join(" ");
-    vote.analysis = classifyPublicVote(vote.id, vote.description, vote.summary);
+    vote.analysis = reviewedPublicVoteClassifications.get(vote.id) ?? null;
   }
 
   const castByVote = new Map<string, Set<number>>();
@@ -957,10 +1067,14 @@ export async function loadPublicVotes(accumulators: Map<number, DeputyAccumulato
       `${CHAMBER_FILES}/votacoesVotos/csv/votacoesVotos-${year}.csv`,
       (row) => {
         const vote = votes.get(row.idVotacao);
-        if (!vote?.analysis) return;
+        if (!vote) return;
         const accumulator = accumulators.get(Number(row.deputado_id));
         if (!accumulator) return;
         const candidateVote = normalizePublicVote(row.voto);
+        if (!vote.analysis) {
+          addUnanalyzedVoteRecord(accumulator, vote, candidateVote);
+          return;
+        }
         addPublicVoteRecord(accumulator, vote, candidateVote);
         if (
           vote.analysis.severity === "high" ||
@@ -1450,7 +1564,9 @@ export function buildPeriodDeputy(
   const metrics: RawMetrics = {
     monthsInOffice: Number((period.daysInOffice / 30.4375).toFixed(2)),
     plenaryAttendances: period.plenaryAttendances.size,
+    plenarySessionsTotal: period.plenarySessionsTotal.size,
     nominalVotes: period.nominalVotes.size,
+    nominalVotesTotal: period.nominalVotesTotal.size,
     substantiveProposals: period.substantiveProposals.size,
     oversightProposals: period.oversightProposals.size,
     advancedProposals: period.advancedProposals.size,
@@ -1600,9 +1716,10 @@ export function buildProfilePeriod(
         };
       })
       ,
-    publicVotes: [...period.publicVotes]
+    publicVotes: [...period.allPublicVotes]
       .sort(
         (a, b) =>
+          Number(b.classification !== "unanalyzed") - Number(a.classification !== "unanalyzed") ||
           Math.abs(b.scoreDelta) - Math.abs(a.scoreDelta) ||
           b.date.localeCompare(a.date),
       ),

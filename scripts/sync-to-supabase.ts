@@ -77,7 +77,7 @@ type ProfileVote = {
   classification: string;
   severity: string;
   scoreDelta: number;
-  confidence: number;
+  confidence: number | null;
   reason: string;
   source: string;
   reviewedManually: boolean;
@@ -119,6 +119,7 @@ type ProposalClassificationsFile = {
     confidence: string;
     justification?: string;
     source?: string;
+    analysisLevel?: number;
   }>;
 };
 
@@ -132,6 +133,7 @@ type VoteClassificationsFile = {
     confidence: number;
     reason?: string;
     source?: string;
+    analysisLevel?: number;
     reviewedManually?: boolean;
   }>;
 };
@@ -168,6 +170,25 @@ async function insertBatches(table: string, rows: TableRow[]) {
     );
     if (error) throw new Error(`${table} insert failed at row ${index}: ${error.message}`);
   }
+}
+
+async function fetchAllRows(
+  table: string,
+  select: string,
+  orderColumn = "id",
+): Promise<Record<string, unknown>[]> {
+  const rows: Record<string, unknown>[] = [];
+  for (let from = 0; ; from += BATCH_SIZE) {
+    const to = from + BATCH_SIZE - 1;
+    const { data, error } = await withRetry(
+      () => supabase.from(table).select(select).order(orderColumn).range(from, to),
+      `${table} select at row ${from}`,
+    );
+    if (error) throw new Error(`${table} select failed at row ${from}: ${error.message}`);
+    rows.push(...((data ?? []) as Record<string, unknown>[]));
+    if (!data || data.length < BATCH_SIZE) break;
+  }
+  return rows;
 }
 
 async function deleteByLegislatorIds(table: string, legislatorIds: number[]) {
@@ -304,7 +325,9 @@ async function syncMetrics(snapshot: SnapshotData) {
         days_in_office: deputy.daysInOffice,
         months_in_office: metricNumber(metrics.monthsInOffice),
         plenary_attendances: metricNumber(metrics.plenaryAttendances),
+        plenary_sessions_total: metricNumber(metrics.plenarySessionsTotal),
         nominal_votes: metricNumber(metrics.nominalVotes),
+        nominal_votes_total: metricNumber(metrics.nominalVotesTotal),
         substantive_proposals: metricNumber(metrics.substantiveProposals),
         oversight_proposals: metricNumber(metrics.oversightProposals),
         advanced_proposals: metricNumber(metrics.advancedProposals),
@@ -510,8 +533,8 @@ async function syncVotes(profileDetails: ProfileData) {
           candidate_vote: vote.candidateVote,
           score_delta: vote.scoreDelta,
           confidence: vote.confidence,
-          reason: vote.reason,
-          source: vote.source,
+          reason: emptyToNull(vote.reason),
+          source: emptyToNull(vote.source),
           reviewed_manually: vote.reviewedManually,
         });
       }
@@ -528,31 +551,58 @@ async function syncClassifications(
   proposalClassifications: ProposalClassificationsFile,
   voteClassifications: VoteClassificationsFile,
 ) {
-  const proposalRows = Object.entries(proposalClassifications.classifications ?? {}).map(
-    ([proposalId, classification]) => ({
-      proposal_id: proposalId,
-      category: classification.category,
-      confidence: classification.confidence,
-      justification: classification.justification ?? null,
-      source: classification.source ?? "reviewed",
-      methodology_version: proposalClassifications.methodologyVersion ?? null,
-    }),
+  const [existingProposalRows, existingVoteRows] = await Promise.all([
+    fetchAllRows("proposal_classifications", "proposal_id, analysis_level", "proposal_id"),
+    fetchAllRows("vote_classifications", "vote_id, analysis_level"),
+  ]);
+  const existingProposalLevels = new Map(
+    existingProposalRows.map((row: Record<string, unknown>) => [
+      row.proposal_id as string,
+      Number(row.analysis_level ?? 1),
+    ]),
+  );
+  const existingVoteLevels = new Map(
+    existingVoteRows.map((row: Record<string, unknown>) => [
+      row.vote_id as string,
+      Number(row.analysis_level ?? 1),
+    ]),
   );
 
+  const proposalRows = Object.entries(proposalClassifications.classifications ?? {}).map(
+    ([proposalId, classification]) => {
+      const source = classification.source ?? "reviewed";
+      const analysisLevel = analysisLevelFor(source, classification.analysisLevel);
+      return {
+        proposal_id: proposalId,
+        category: classification.category,
+        confidence: classification.confidence,
+        justification: classification.justification ?? null,
+        source,
+        analysis_level: analysisLevel,
+        methodology_version: proposalClassifications.methodologyVersion ?? null,
+      };
+    },
+  ).filter((row) => (existingProposalLevels.get(row.proposal_id) ?? 0) <= row.analysis_level);
+
   const voteRows = Object.entries(voteClassifications.classifications ?? {}).map(
-    ([voteId, classification]) => ({
-      vote_id: voteId,
-      session_number: sessionNumberFromVoteId(voteId),
-      classification: classification.classification,
-      severity: classification.severity,
-      public_interest_vote: classification.publicInterestVote,
-      confidence: classification.confidence,
-      reason: classification.reason ?? null,
-      source: classification.source ?? "reviewed",
-      reviewed_manually: classification.reviewedManually ?? true,
-      methodology_version: voteClassifications.methodologyVersion ?? null,
-    }),
-  );
+    ([voteId, classification]) => {
+      const source = classification.source ?? "reviewed";
+      const analysisLevel = analysisLevelFor(source, classification.analysisLevel);
+      return {
+        vote_id: voteId,
+        session_number: sessionNumberFromVoteId(voteId),
+        classification: classification.classification,
+        severity: classification.severity,
+        public_interest_vote: classification.publicInterestVote,
+        confidence: classification.confidence,
+        reason: classification.reason ?? null,
+        source,
+        analysis_level: analysisLevel,
+        reviewed_manually: classification.reviewedManually ?? true,
+        methodology_version: voteClassifications.methodologyVersion ?? null,
+      };
+    },
+  ).filter((row) => (existingVoteLevels.get(row.vote_id) ?? 0) <= row.analysis_level);
 
   console.log(`Upserting ${proposalRows.length} proposal classifications and ${voteRows.length} vote classifications...`);
   await upsertBatches(
@@ -604,6 +654,13 @@ function emptyToNull(value: string | null | undefined): string | null {
   return value ? value : null;
 }
 
+function analysisLevelFor(source: string | undefined, explicitLevel?: number) {
+  if (explicitLevel === 1 || explicitLevel === 2 || explicitLevel === 3) {
+    return explicitLevel;
+  }
+  return source === "rule" ? 1 : 2;
+}
+
 function sessionNumberFromVoteId(voteId: string): string | null {
   const [, ...rest] = voteId.split("-");
   return rest.length > 0 ? rest.join("-") : null;
@@ -633,7 +690,7 @@ async function refreshPostgrestSchema(client: SupabaseClient) {
 
 async function uploadToSupabase() {
   const scriptDir = dirname(fileURLToPath(import.meta.url));
-  const dataDir = join(scriptDir, "..", "src", "data");
+  const dataDir = join(scriptDir, "..", ".data");
 
   console.log("Reading JSON files...");
   const snapshot = await readJson<SnapshotData>(join(dataDir, "ranking-snapshot.json"));

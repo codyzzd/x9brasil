@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Filter, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Sheet,
@@ -154,6 +153,15 @@ export function RankingBrowser({
     setVisible(PAGE_SIZE);
   };
 
+  const filterPeriods = periodSelectOrder(
+    snapshot.periods.map(({ id, label, partial, end }) => ({
+      id,
+      label,
+      partial,
+      end,
+    })),
+  );
+
   const filters = (
     <RankingFilters
       index={index}
@@ -162,12 +170,7 @@ export function RankingBrowser({
       state={state}
       party={party}
       order={order}
-      periods={periodSelectOrder(snapshot.periods.map(({ id, label, partial, end }) => ({
-        id,
-        label,
-        partial,
-        end,
-      })))}
+      periods={filterPeriods}
       states={states}
       parties={parties}
       onPeriodChange={(value) => {
@@ -194,16 +197,46 @@ export function RankingBrowser({
     />
   );
 
-  return (
-    <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
-      <aside className="hidden lg:block">
-        <Card className="sticky top-24">
-          <CardContent>{filters}</CardContent>
-        </Card>
-      </aside>
+  const filterToolbar = (
+    <RankingFilters
+      index={index}
+      period={period}
+      comparison={comparison}
+      state={state}
+      party={party}
+      order={order}
+      periods={filterPeriods}
+      states={states}
+      parties={parties}
+      onPeriodChange={(value) => {
+        setPeriod(value);
+        setState("all");
+        setParty("all");
+        setVisible(PAGE_SIZE);
+      }}
+      onComparisonChange={setComparison}
+      onStateChange={(value) => {
+        setState(value);
+        setVisible(PAGE_SIZE);
+      }}
+      onPartyChange={(value) => {
+        setParty(value);
+        setVisible(PAGE_SIZE);
+      }}
+      onOrderChange={(value) => {
+        setOrder(value);
+        setDirection(value === "name" ? "asc" : "desc");
+        setVisible(PAGE_SIZE);
+      }}
+      onReset={reset}
+      layout="toolbar"
+    />
+  );
 
-      <div className="min-w-0">
-        <div className="mb-5 flex gap-2">
+  return (
+    <div className="min-w-0 space-y-5">
+      <div className="space-y-3">
+        <div className="flex gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -220,7 +253,7 @@ export function RankingBrowser({
           <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
             <Button
               variant="outline"
-              className="lg:hidden"
+              className="h-10 md:hidden"
               onClick={() => setFiltersOpen(true)}
             >
               <Filter className="size-4" /> Filtros
@@ -234,6 +267,12 @@ export function RankingBrowser({
           </Sheet>
         </div>
 
+        <div className="hidden md:block">
+          {filterToolbar}
+        </div>
+      </div>
+
+      <div className="min-w-0">
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Summary label="Deputados no grupo" value={periodDeputies.length} />
           <Summary label="Com posição" value={eligible.length} />

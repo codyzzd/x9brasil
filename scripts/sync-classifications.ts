@@ -16,6 +16,30 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 });
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const PAGE_SIZE = 1000;
+
+function analysisLevelFor(source: string | undefined, explicitLevel?: number) {
+  if (explicitLevel === 1 || explicitLevel === 2 || explicitLevel === 3) {
+    return explicitLevel;
+  }
+  return source === "rule" ? 1 : 2;
+}
+
+async function fetchAllRows(table: string, select: string, orderColumn = "id") {
+  const rows: Record<string, unknown>[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const to = from + PAGE_SIZE - 1;
+    const { data, error } = await supabase
+      .from(table)
+      .select(select)
+      .order(orderColumn)
+      .range(from, to);
+    if (error) throw error;
+    rows.push(...((data ?? []) as Record<string, unknown>[]));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  return rows;
+}
 
 async function syncProposalClassifications() {
   console.log("Syncing proposal classifications...");
@@ -28,18 +52,37 @@ async function syncProposalClassifications() {
     category: string;
     confidence: string;
     justification: string;
+    source?: string;
+    analysisLevel?: number;
   }]>;
 
   console.log(`  Found ${entries.length} proposal classifications`);
 
-  const rows = entries.map(([proposalId, cls]) => ({
-    proposal_id: proposalId,
-    category: cls.category,
-    confidence: cls.confidence,
-    justification: cls.justification,
-    source: "reviewed",
-    methodology_version: methodologyVersion,
-  }));
+  const existing = await fetchAllRows(
+    "proposal_classifications",
+    "proposal_id, analysis_level",
+    "proposal_id",
+  );
+  const existingLevels = new Map(
+    existing.map((row: Record<string, unknown>) => [
+      row.proposal_id as string,
+      Number(row.analysis_level ?? 1),
+    ]),
+  );
+
+  const rows = entries.map(([proposalId, cls]) => {
+    const source = cls.source ?? "reviewed";
+    const analysisLevel = analysisLevelFor(source, cls.analysisLevel);
+    return {
+      proposal_id: proposalId,
+      category: cls.category,
+      confidence: cls.confidence,
+      justification: cls.justification,
+      source,
+      analysis_level: analysisLevel,
+      methodology_version: methodologyVersion,
+    };
+  }).filter((row) => (existingLevels.get(row.proposal_id) ?? 0) <= row.analysis_level);
 
   const { error } = await supabase.from("proposal_classifications").upsert(rows, {
     onConflict: "proposal_id",
@@ -65,14 +108,28 @@ async function syncVoteClassifications() {
     publicInterestVote: string;
     confidence: number;
     reason: string;
+    source?: string;
+    analysisLevel?: number;
+    reviewedManually?: boolean;
   }]>;
 
   console.log(`  Found ${entries.length} vote classifications`);
+
+  const existing = await fetchAllRows("vote_classifications", "vote_id, analysis_level");
+  const existingLevels = new Map(
+    existing.map((row: Record<string, unknown>) => [
+      row.vote_id as string,
+      Number(row.analysis_level ?? 1),
+    ]),
+  );
 
   for (const [compositeKey, cls] of entries) {
     const parts = compositeKey.split("-");
     const voteId = parts[0];
     const sessionNumber = parts.length > 1 ? parts.slice(1).join("-") : null;
+    const source = cls.source ?? "reviewed";
+    const analysisLevel = analysisLevelFor(source, cls.analysisLevel);
+    if ((existingLevels.get(voteId) ?? 0) > analysisLevel) continue;
 
     const { error } = await supabase.from("vote_classifications").upsert({
       vote_id: voteId,
@@ -82,8 +139,9 @@ async function syncVoteClassifications() {
       public_interest_vote: cls.publicInterestVote,
       confidence: cls.confidence,
       reason: cls.reason,
-      source: "reviewed",
-      reviewed_manually: true,
+      source,
+      analysis_level: analysisLevel,
+      reviewed_manually: cls.reviewedManually ?? true,
       methodology_version: methodologyVersion,
     }, {
       onConflict: "vote_id,session_number",

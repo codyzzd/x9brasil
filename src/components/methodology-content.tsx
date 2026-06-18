@@ -1,10 +1,13 @@
 import {
   AlertTriangle,
-  ArrowLeftRight,
   ArrowUpDown,
   Banknote,
   Calculator,
   CheckCircle2,
+  CircleHelp,
+  ClipboardCheck,
+  FileSearch,
+  Gauge,
   Layers,
   Lightbulb,
   Palette,
@@ -12,6 +15,7 @@ import {
   ThumbsUp,
   Users,
   Zap,
+  type LucideIcon,
 } from "lucide-react";
 import {
   PUBLIC_VALUE_CATEGORIES,
@@ -54,6 +58,59 @@ export async function MethodologyContent() {
     <>
       <PublicValueSection metadata={publicValueMetadata} />
     </>
+  );
+}
+
+function QuickFact({
+  icon: Icon,
+  title,
+  text,
+}: {
+  icon: LucideIcon;
+  title: string;
+  text: string;
+}) {
+  return (
+    <div className="rounded-md bg-muted/60 p-3">
+      <p className="flex items-center gap-2 font-medium text-foreground">
+        <Icon className="size-4 text-blue-600 dark:text-blue-300" />
+        {title}
+      </p>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground text-pretty">
+        {text}
+      </p>
+    </div>
+  );
+}
+
+function AnalysisLevel({
+  icon: Icon,
+  label,
+  title,
+  text,
+}: {
+  icon: LucideIcon;
+  label: string;
+  title: string;
+  text: string;
+}) {
+  return (
+    <div className="rounded-md bg-muted/60 p-3">
+      <div className="flex items-start gap-3">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background text-blue-700 shadow-xs dark:text-blue-300">
+          <Icon className="size-4" />
+        </span>
+        <div>
+          <p className="text-xs font-semibold uppercase text-blue-700 dark:text-blue-300">
+            {label}
+          </p>
+          <p className="font-medium text-foreground">{title}</p>
+        </div>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground text-pretty">
+        {text}
+      </p>
+    </div>
   );
 }
 
@@ -105,21 +162,94 @@ function PublicValueSection({
 }) {
   return (
     <div className="mt-10 space-y-6">
-      <div>
-        <p className="text-sm font-medium text-blue-700 dark:text-blue-400">
-          Índice 2
-        </p>
-        <h2 className="mt-1 text-3xl font-bold tracking-tight">
-          Valor Público experimental
-        </h2>
-        <p className="mt-3 leading-7 text-muted-foreground text-pretty">
-          Calculado nacionalmente e com maior peso para contribuição pública.
-          Notas e posições sempre refletem o parlamento inteiro; estado e
-          partido apenas filtram a visualização.
-        </p>
+      <div className="rounded-lg border bg-card p-5 sm:p-6">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-2xl">
+            <p className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+              <Gauge className="size-3.5" /> Índice experimental
+            </p>
+            <h2 className="mt-3 text-3xl font-bold text-balance">
+              Valor Público
+            </h2>
+            <p className="mt-3 leading-7 text-muted-foreground text-pretty">
+              Mede contribuição pública em vez de só volume de atividade. A
+              nota combina proposições, votos, eficiência, participação e
+              finanças de campanha em uma escala de 0 a 100.
+            </p>
+          </div>
+
+          <div className="grid gap-2 text-sm sm:grid-cols-2 lg:w-[420px]">
+            <QuickFact
+              icon={Gauge}
+              title="Nota de 0 a 100"
+              text="Quanto maior, melhor dentro do grupo comparado."
+            />
+            <QuickFact
+              icon={Users}
+              title="Comparação nacional"
+              text="Estado e partido filtram a tela, não mudam a régua."
+            />
+            <QuickFact
+              icon={Layers}
+              title="Cobertura por níveis"
+              text="N1, N2 e N3 indicam profundidade da análise."
+            />
+            <QuickFact
+              icon={CircleHelp}
+              title="Pendente não vira zero"
+              text="O que não foi classificado fica fora do cálculo."
+            />
+          </div>
+        </div>
       </div>
 
       <PercentileCard />
+
+      <div className="rounded-lg border bg-card">
+        <div className="border-b px-4 py-3">
+          <p className="flex items-center gap-2 font-semibold">
+            <Layers className="size-4 text-muted-foreground" /> Cobertura e profundidade da análise
+          </p>
+          <p className="text-xs text-muted-foreground">
+            A tarja superior resume quanto da base já foi analisada.
+          </p>
+        </div>
+        <div className="space-y-3 p-4 text-sm leading-6 text-muted-foreground">
+          <p>
+            <strong className="font-medium text-foreground">Cobertura</strong>{" "}
+            é a parcela de proposições e votações que já recebeu alguma
+            classificação no banco. Os percentuais N1, N2 e N3 mostram a
+            profundidade dessa análise.
+          </p>
+          <div className="grid gap-3 md:grid-cols-3">
+            <AnalysisLevel
+              icon={ClipboardCheck}
+              label="N1"
+              title="Automático"
+              text="Regras objetivas identificam casos evidentes por texto: homenagem, transparência, saúde, educação ou privilégio político."
+            />
+            <AnalysisLevel
+              icon={FileSearch}
+              label="N2"
+              title="Assistido por IA"
+              text="Em teste. Usa ementa, descrição e resumo para classificar casos que precisam de mais contexto."
+            />
+            <AnalysisLevel
+              icon={Layers}
+              label="N3"
+              title="Teor integral"
+              text="Em teste. Usa o texto completo quando disponível e tem prioridade sobre análises mais rasas."
+            />
+          </div>
+          <p>
+            A ordem de prioridade é N3, depois N2 e depois N1. Assim, uma
+            análise mais profunda não é substituída por uma análise mais rasa
+            quando novos syncs ou reprocessamentos rodam. Itens pendentes não
+            recebem nota zero; eles simplesmente ficam fora das partes do
+            cálculo que dependem de classificação.
+          </p>
+        </div>
+      </div>
 
       <div className="rounded-lg border bg-card">
         <div className="border-b px-4 py-3">
@@ -240,20 +370,20 @@ function PublicValueSection({
               </p>
               <ul className="mt-1 list-disc pl-4 space-y-1">
                 <li>
-                  PL da transparência salarial: voto "sim" →
+                  PL da transparência salarial: voto &quot;sim&quot; →
                   <br />
-                  classificação "positive_public_interest" → +3 pontos
+                  classificação &quot;positive_public_interest&quot; → +3 pontos
                 </li>
                 <li>
-                  Aumento de verba de gabinete sem justificativa: voto "sim"
+                  Aumento de verba de gabinete sem justificativa: voto &quot;sim&quot;
                   →
                   <br />
-                  classificação "negative_public_interest" → −2 pontos
+                  classificação &quot;negative_public_interest&quot; → −2 pontos
                 </li>
                 <li>
-                  Nomeação de rua: voto "não" →
+                  Nomeação de rua: voto &quot;não&quot; →
                   <br />
-                  classificação "low_relevance" → 0 pontos
+                  classificação &quot;low_relevance&quot; → 0 pontos
                 </li>
                 <li>Pontuação total de votos públicos: +1 ponto</li>
                 <li>
@@ -521,15 +651,6 @@ function Band({
         <p className="font-semibold">{title}</p>
         <p className="text-sm tabular-nums">{range} pontos</p>
       </div>
-    </div>
-  );
-}
-
-function Method({ title, text }: { title: string; text: string }) {
-  return (
-    <div>
-      <p className="font-medium">{title}</p>
-      <p className="text-muted-foreground text-pretty">{text}</p>
     </div>
   );
 }
