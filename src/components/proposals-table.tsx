@@ -17,12 +17,14 @@ import {
   Shield,
   Sparkles,
   Users,
+  XIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { buttonVariants } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetHeader,
   SheetTitle,
@@ -196,153 +198,190 @@ function ProposalSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
-        <SheetHeader className="pb-4 border-b">
-          <SheetTitle className="text-base">
-            {proposal.type} {proposal.number}/{proposal.year}
-          </SheetTitle>
-          <SheetDescription>
-            Detalhes completos da proposição
-          </SheetDescription>
+      <SheetContent
+        side="right"
+        showCloseButton={false}
+        className="w-full overflow-y-auto data-[side=right]:w-full data-[side=right]:sm:max-w-2xl data-[side=right]:lg:max-w-4xl data-[side=right]:xl:max-w-5xl"
+      >
+        <SheetHeader className="sticky top-0 z-10 flex-row items-start justify-between gap-4 border-b bg-popover pb-4 sm:px-6 lg:px-8">
+          <div className="min-w-0">
+            <SheetTitle className="text-balance text-base">
+              {proposal.type} {proposal.number}/{proposal.year}
+            </SheetTitle>
+            <SheetDescription>
+              Detalhes completos da proposição
+            </SheetDescription>
+          </div>
+          <SheetClose
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                className="-mr-3 -mt-2 size-10 shrink-0"
+              />
+            }
+          >
+            <XIcon />
+            <span className="sr-only">Fechar</span>
+          </SheetClose>
         </SheetHeader>
 
-        <div className="flex-1 space-y-5 p-4 pt-5">
-          <section>
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-              Dados oficiais
-            </h4>
-            <p className="text-sm leading-relaxed text-foreground">
-              {proposal.summary}
-            </p>
-            <dl className="mt-4 grid grid-cols-2 gap-4">
-              <div>
-                <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                  Tipo
-                </dt>
-                <dd className="text-sm">{proposal.type}</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                  Data
-                </dt>
-                <dd className="text-sm">{formatDate(proposal.date)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                  Status
-                </dt>
-                <dd className="text-sm">{proposal.status}</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                  Papel
-                </dt>
-                <dd>
-                  <Badge
-                    variant="outline"
-                    className={cn("inline-flex items-center gap-1 text-[11px]", ROLE_STYLES[proposal.participationRole] || "")}
-                  >
-                    {ROLE_ICONS[proposal.participationRole]}
-                    {proposal.participationLabel}
-                  </Badge>
-                </dd>
-              </div>
-            </dl>
-            <div className="mt-4">
-              <Badge
-                variant="outline"
-                className={cn("inline-flex items-center gap-1 text-[11px]", NATURE_STYLES[proposal.proposalNature] || "")}
-              >
-                {NATURE_ICONS[proposal.proposalNature]}
-                {proposal.proposalNatureLabel}
-              </Badge>
-            </div>
-          </section>
-
-          {pv && (
-            <>
-              <section>
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                  Classificação
-                </h4>
-                <div className="flex flex-wrap gap-1.5">
-                  <Badge
-                    variant="outline"
-                    className={cn("inline-flex items-center gap-1 text-[11px]", labelStyle(pv.category))}
-                  >
-                    <Sparkles className="size-3" />
-                    {pv.categoryLabel}
-                  </Badge>
-                  {method && MethodIcon && (
-                    <Badge variant="outline" className="inline-flex items-center gap-1 text-[11px]">
-                      <MethodIcon className="size-3" />
-                      {method.label}
-                    </Badge>
-                  )}
+        <div className="grid flex-1 gap-6 px-4 py-5 sm:px-6 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-8 lg:px-8">
+          <div className="space-y-6">
+            <section>
+              <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Dados oficiais
+              </h4>
+              <p className="text-pretty text-sm leading-relaxed text-foreground">
+                {proposal.summary}
+              </p>
+              <dl className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <dt className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Tipo
+                  </dt>
+                  <dd className="text-sm">{proposal.type}</dd>
                 </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Confiança: {pv.confidence === "high" ? "alta" : pv.confidence === "medium" ? "média" : "baixa"}
-                </p>
-              </section>
+                <div>
+                  <dt className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Data
+                  </dt>
+                  <dd className="text-sm">{formatDate(proposal.date)}</dd>
+                </div>
+                <div>
+                  <dt className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Status
+                  </dt>
+                  <dd className="text-sm">{proposal.status}</dd>
+                </div>
+                <div>
+                  <dt className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Papel
+                  </dt>
+                  <dd>
+                    <Badge
+                      variant="outline"
+                      className={cn("inline-flex items-center gap-1 text-[11px]", ROLE_STYLES[proposal.participationRole] || "")}
+                    >
+                      {ROLE_ICONS[proposal.participationRole]}
+                      {proposal.participationLabel}
+                    </Badge>
+                  </dd>
+                </div>
+              </dl>
+              <div className="mt-4">
+                <Badge
+                  variant="outline"
+                  className={cn("inline-flex items-center gap-1 text-[11px]", NATURE_STYLES[proposal.proposalNature] || "")}
+                >
+                  {NATURE_ICONS[proposal.proposalNature]}
+                  {proposal.proposalNatureLabel}
+                </Badge>
+              </div>
+            </section>
 
-              <section>
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                  Saiba por quê
-                </h4>
-                <p className="text-xs font-medium text-muted-foreground">
-                  {justificationTitle(pv.source, pv.analysisLevel)}
+            <section className="border-t pt-5">
+              <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Saiba por quê
+              </h4>
+              {pv ? (
+                <>
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {justificationTitle(pv.source, pv.analysisLevel)}
+                  </p>
+                  <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
+                    {pv.justification || "Esta proposição ainda não tem justificativa detalhada registrada."}
+                  </p>
+                </>
+              ) : (
+                <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
+                  Esta proposição ainda não foi classificada pela metodologia de valor público.
                 </p>
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  {pv.justification || "Esta proposição ainda não tem justificativa detalhada registrada."}
-                </p>
-              </section>
-
-              {(pv.analysisMethodVersion || pv.netPublicEffect || pv.declaredBenefit || pv.hiddenCost) && (
-                <section>
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                    Auditoria N3
-                  </h4>
-                  <dl className="grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tipo</dt>
-                      <dd>{pv.legislativeType || proposal.type || "-"}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Efeito líquido</dt>
-                      <dd>{netPublicEffectLabel(pv.netPublicEffect || "")}</dd>
-                    </div>
-                  </dl>
-                  {(pv.declaredBenefit || pv.hiddenCost) && (
-                    <div className="mt-3 space-y-2 text-sm text-muted-foreground">
-                      {pv.declaredBenefit && <p><span className="font-medium text-foreground">Benefício declarado:</span> {pv.declaredBenefit}</p>}
-                      {pv.hiddenCost && <p><span className="font-medium text-foreground">Custo escondido:</span> {pv.hiddenCost}</p>}
-                    </div>
-                  )}
-                  {pv.riskFlags && pv.riskFlags.filter((flag) => flag !== "none").length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {pv.riskFlags.filter((flag) => flag !== "none").map((flag) => (
-                        <Badge key={flag} variant="outline" className="text-[11px]">
-                          {riskFlagLabel(flag)}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                  {pv.criticalArticles && pv.criticalArticles.length > 0 && (
-                    <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
-                      {pv.criticalArticles.map((item, index) => (
-                        <li key={`${item.article}-${index}`}>
-                          <span className="font-medium text-foreground">{item.article}:</span> {item.issue}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
               )}
+            </section>
 
-              <section>
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                  Impacto
+            {pv && (pv.analysisMethodVersion || pv.netPublicEffect || pv.declaredBenefit || pv.hiddenCost) && (
+              <section className="border-t pt-5">
+                <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Auditoria N3
                 </h4>
+                <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                  <div>
+                    <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tipo</dt>
+                    <dd>{pv.legislativeType || proposal.type || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Efeito líquido</dt>
+                    <dd>{netPublicEffectLabel(pv.netPublicEffect || "")}</dd>
+                  </div>
+                </dl>
+                {(pv.declaredBenefit || pv.hiddenCost) && (
+                  <div className="mt-3 space-y-2 text-pretty text-sm text-muted-foreground">
+                    {pv.declaredBenefit && <p><span className="font-medium text-foreground">Benefício declarado:</span> {pv.declaredBenefit}</p>}
+                    {pv.hiddenCost && <p><span className="font-medium text-foreground">Custo escondido:</span> {pv.hiddenCost}</p>}
+                  </div>
+                )}
+                {pv.riskFlags && pv.riskFlags.filter((flag) => flag !== "none").length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {pv.riskFlags.filter((flag) => flag !== "none").map((flag) => (
+                      <Badge key={flag} variant="outline" className="text-[11px]">
+                        {riskFlagLabel(flag)}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                {pv.criticalArticles && pv.criticalArticles.length > 0 && (
+                  <ul className="mt-3 space-y-1 text-pretty text-xs text-muted-foreground">
+                    {pv.criticalArticles.map((item, index) => (
+                      <li key={`${item.article}-${index}`}>
+                        <span className="font-medium text-foreground">{item.article}:</span> {item.issue}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )}
+          </div>
+
+          <aside className="space-y-6 border-t pt-5 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+            <section>
+              <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Classificação
+              </h4>
+              {pv ? (
+                <>
+                  <div className="flex flex-wrap gap-1.5">
+                    <Badge
+                      variant="outline"
+                      className={cn("inline-flex items-center gap-1 text-[11px]", labelStyle(pv.category))}
+                    >
+                      <Sparkles className="size-3" />
+                      {pv.categoryLabel}
+                    </Badge>
+                    {method && MethodIcon && (
+                      <Badge variant="outline" className="inline-flex items-center gap-1 text-[11px]">
+                        <MethodIcon className="size-3" />
+                        {method.label}
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Confiança: {pv.confidence === "high" ? "alta" : pv.confidence === "medium" ? "média" : "baixa"}
+                  </p>
+                </>
+              ) : (
+                <Badge variant="outline" className="inline-flex items-center gap-1 text-[11px]">
+                  <FileSearch className="size-3" />
+                  Não analisada
+                </Badge>
+              )}
+            </section>
+
+            <section className="border-t pt-5">
+              <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Impacto
+              </h4>
+              {pv ? (
                 <div className="space-y-1">
                   <p className={cn(
                     "text-lg font-semibold tabular-nums",
@@ -354,7 +393,7 @@ function ProposalSheet({
                     })}{" "}
                     pts
                   </p>
-                  <ul className="space-y-0.5 text-xs text-muted-foreground">
+                  <ul className="space-y-0.5 text-pretty text-xs text-muted-foreground">
                     <li>Peso do tema: ×{pv.categoryWeight}</li>
                     <li>Papel: ×{pv.roleWeight}</li>
                     <li>Natureza: ×{pv.natureWeight}</li>
@@ -365,42 +404,16 @@ function ProposalSheet({
                     {method && <li>Método: {method.label}</li>}
                   </ul>
                 </div>
-              </section>
-            </>
-          )}
+              ) : (
+                <>
+                  <p className="text-lg font-semibold text-muted-foreground tabular-nums">0 pts</p>
+                  <p className="text-pretty text-xs text-muted-foreground">
+                    Itens não analisados não entram na produção.
+                  </p>
+                </>
+              )}
+            </section>
 
-          {!pv && (
-            <>
-              <section>
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                  Classificação
-                </h4>
-                <Badge variant="outline" className="inline-flex items-center gap-1 text-[11px]">
-                  <FileSearch className="size-3" />
-                  Não analisada
-                </Badge>
-              </section>
-              <section>
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                  Saiba por quê
-                </h4>
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  Esta proposição ainda não foi classificada pela metodologia de valor público.
-                </p>
-              </section>
-              <section>
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                  Impacto
-                </h4>
-                <p className="text-lg font-semibold tabular-nums text-muted-foreground">0 pts</p>
-                <p className="text-xs text-muted-foreground">
-                  Itens não analisados não entram na produção.
-                </p>
-              </section>
-            </>
-          )}
-
-          <div className="pt-2">
             <a
               href={proposal.url}
               target="_blank"
@@ -413,7 +426,7 @@ function ProposalSheet({
               <ExternalLink className="size-3.5" />
               Abrir na Câmara
             </a>
-          </div>
+          </aside>
         </div>
       </SheetContent>
     </Sheet>

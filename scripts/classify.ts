@@ -4,9 +4,11 @@ import { createInterface } from "node:readline/promises";
 import {
   PUBLIC_VALUE_CATEGORIES,
   VOTE_METHODOLOGY_VERSION,
+  LEGISLATIVE_IMPACT_V4_VERSION,
   buildPublicVoteRecord,
   getProposalWeight,
   inferLegislativeType,
+  inferVoteObjectSubtype,
   inferVoteObjectType,
   normalizeProposalAnalysis,
   normalizeVoteAnalysis,
@@ -14,6 +16,7 @@ import {
   publicValueClassificationMetadata,
   type CandidateVote,
   type ClassificationConfidence,
+  type ClassificationSource,
   type CriticalArticle,
   type DecisionNature,
   type DecisionScope,
@@ -31,6 +34,13 @@ import {
   type ScoreImpactLimit,
   type SummaryMatchesText,
   type VoteObjectType,
+  type VoteObjectSubtype,
+  type PrimaryTextUsed,
+  type ModelRecommendation,
+  type ModelRole,
+  type RiskLevel,
+  type AnalysisStatus,
+  type CoverageCategory,
 } from "../src/lib/public-value";
 import {
   detectContextLimit,
@@ -47,6 +57,7 @@ import {
   loadConfig,
   saveConfig,
   type AnalysisMode,
+  type ProviderId,
 } from "./providers";
 
 loadEnvConfig(process.cwd());
@@ -65,6 +76,9 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 
 const PAGE_SIZE = 1000;
 const BATCH_SIZE = 500;
+const VOTE_LINK_READ_BATCH_SIZE = 10;
+const METRIC_LEGISLATOR_READ_BATCH_SIZE = 10;
+const MATERIALIZE_CLASSIFICATION_BATCH_SIZE = 25;
 const DEFAULT_LIMIT = 10;
 const DEFAULT_CONCURRENCY = 1;
 const DEFAULT_DELAY_MS = 2000;
@@ -73,6 +87,10 @@ type Row = Record<string, unknown>;
 type ClassifyTarget = "votes" | "proposals" | "both";
 type ClassifyScope = "improvable" | "overwrite";
 type AnalysisLevel = 2 | 3;
+type PostProcessMode = "classify_only" | "classify_and_recalculate" | "materialize_only";
+type ClassificationRunMode = "new" | "resume" | "retry_failed";
+type ClassificationRunStatus = "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
+type ClassificationRunItemStatus = "pending" | "processing" | "classified" | "failed" | "skipped";
 
 type ProposalRow = {
   id: string;
@@ -99,6 +117,45 @@ type ClassificationRow = {
   analysis_level: number | null;
 };
 
+type ClassificationRunRow = {
+  id: string;
+  target: ClassifyTarget;
+  analysis_level: AnalysisLevel;
+  scope: ClassifyScope;
+  limit_per_target: number;
+  concurrency: number;
+  post_process_mode: PostProcessMode;
+  provider: string | null;
+  model: string | null;
+  strong_review_enabled?: boolean | null;
+  strong_provider?: string | null;
+  strong_model?: string | null;
+  method_version: string | null;
+  status: ClassificationRunStatus;
+  total_items: number;
+  pending_count: number;
+  processing_count: number;
+  classified_count: number;
+  failed_count: number;
+  skipped_count: number;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type ClassificationRunItemRow = {
+  id: number;
+  run_id: string;
+  target: "votes" | "proposals";
+  item_id: string;
+  item_label: string | null;
+  status: ClassificationRunItemStatus;
+  error_kind: string | null;
+  error_message: string | null;
+  attempts: number;
+  duration_ms: number | null;
+};
+
 type LegislatorProposalRow = {
   legislator_id: number;
   proposal_id: string;
@@ -114,7 +171,57 @@ type LegislatorVoteRow = {
   period_id: string;
   candidate_vote: CandidateVote;
   score_delta: number | string;
+  score_points?: number | string | null;
   confidence: number | string | null;
+  affects_score?: boolean | null;
+  analysis_status?: AnalysisStatus | null;
+  needs_strong_review?: boolean | null;
+  review_reason?: string | null;
+  coverage_category?: CoverageCategory | null;
+  score_safety_reason?: string | null;
+  model_used?: string | null;
+  model_role?: ModelRole | null;
+};
+
+type VoteClassificationRow = {
+  vote_id: string;
+  classification: PublicVoteClassification;
+  severity: PublicVoteSeverity;
+  public_interest_vote: PublicInterestVote;
+  confidence: number | string;
+  reason: string;
+  source: ClassificationSource;
+  analysis_level: AnalysisLevel | number | null;
+  reviewed_manually: boolean | null;
+  methodology_version: string | null;
+  analysis_method_version?: string | null;
+  legislative_type?: LegislativeType | null;
+  decision_nature?: DecisionNature | null;
+  decision_scope?: DecisionScope | null;
+  vote_object_type?: VoteObjectType | null;
+  vote_object_description?: string | null;
+  yes_means?: string | null;
+  no_means?: string | null;
+  analyzed_text_matches_vote_object?: SummaryMatchesText | null;
+  score_impact_limit?: ScoreImpactLimit | null;
+  is_procedural_vote?: boolean | null;
+  declared_benefit?: string | null;
+  hidden_cost?: string | null;
+  net_public_effect?: NetPublicEffect | null;
+  has_tradeoff?: boolean | null;
+  summary_matches_text?: SummaryMatchesText | null;
+  risk_flags?: RiskFlag[] | null;
+  critical_articles?: CriticalArticle[] | null;
+  analysis_payload?: Record<string, unknown> | null;
+  model_used?: string | null;
+  model_role?: ModelRole | null;
+  analysis_status?: AnalysisStatus | null;
+  risk_level?: RiskLevel | null;
+  needs_strong_review?: boolean | null;
+  review_reason?: string | null;
+  coverage_category?: CoverageCategory | null;
+  affects_score?: boolean | null;
+  score_safety_reason?: string | null;
 };
 
 type ProposalLlmResult = {
@@ -137,6 +244,7 @@ type ProposalLlmResult = {
 
 type VoteLlmResult = {
   classification: PublicVoteClassification;
+  rawClassification?: string;
   severity: PublicVoteSeverity;
   publicInterestVote: PublicInterestVote;
   confidence: number;
@@ -145,11 +253,27 @@ type VoteLlmResult = {
   decisionNature?: DecisionNature;
   decisionScope?: DecisionScope;
   voteObjectType?: VoteObjectType;
+  voteObjectSubtype?: VoteObjectSubtype;
   voteObjectDescription?: string;
   yesMeans?: string;
   noMeans?: string;
+  voteObjectTextFound?: boolean;
+  primaryTextUsed?: PrimaryTextUsed;
+  usedRelatedBillAsMainEvidence?: boolean;
   analyzedTextMatchesVoteObject?: SummaryMatchesText;
   scoreImpactLimit?: ScoreImpactLimit;
+  recommendedScoreImpact?: number;
+  scoreSafetyReason?: string;
+  modelRecommendation?: ModelRecommendation;
+  modelUsed?: string;
+  modelRole?: ModelRole;
+  riskLevel?: RiskLevel;
+  analysisStatus?: AnalysisStatus;
+  affectsScore?: boolean;
+  scorePoints?: number | null;
+  needsStrongReview?: boolean;
+  reviewReason?: string;
+  coverageCategory?: CoverageCategory;
   declaredBenefit?: string;
   hiddenCost?: string;
   netPublicEffect?: NetPublicEffect;
@@ -165,6 +289,17 @@ type VoteLlmResult = {
 type RunStats = {
   proposals: { classified: number; failed: number; skipped: number; metricRows: number };
   votes: { classified: number; failed: number; skipped: number; metricRows: number; linksUpdated: number };
+};
+
+type ModelSelection = {
+  provider: ReturnType<typeof getProvider>;
+  model: string;
+};
+
+type StrongReviewConfig = {
+  enabled: boolean;
+  provider?: ReturnType<typeof getProvider>;
+  model?: string;
 };
 type EligibilityCounts = {
   votes: { total: number; classified: number; improvable: number; overwrite: number };
@@ -199,22 +334,48 @@ async function fetchAll<T extends Row>(table: string, select = "*", orderColumn 
   return rows;
 }
 
-async function fetchByIds<T extends Row>(table: string, ids: string[], select = "*", column = "id") {
+function isStatementTimeout(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLocaleLowerCase("pt-BR").includes("statement timeout") ||
+    message.toLocaleLowerCase("pt-BR").includes("canceling statement due to statement timeout");
+}
+
+async function fetchByIdsBatch<T extends Row>(
+  table: string,
+  batch: string[],
+  select: string,
+  column: string,
+  orderColumn: string,
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const to = from + PAGE_SIZE - 1;
+    const { data, error } = await supabase
+      .from(table)
+      .select(select)
+      .in(column, batch)
+      .order(orderColumn)
+      .range(from, to);
+    if (error) throw new Error(`Failed to read ${table}: ${error.message}`);
+    rows.push(...((data ?? []) as T[]));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  return rows;
+}
+
+async function fetchByIds<T extends Row>(table: string, ids: string[], select = "*", column = "id", batchSize = BATCH_SIZE) {
   const rows: T[] = [];
   if (ids.length === 0) return rows;
   const orderColumn = table === "proposal_classifications" ? "proposal_id" : "id";
-  for (const batch of chunks(ids)) {
-    for (let from = 0; ; from += PAGE_SIZE) {
-      const to = from + PAGE_SIZE - 1;
-      const { data, error } = await supabase
-        .from(table)
-        .select(select)
-        .in(column, batch)
-        .order(orderColumn)
-        .range(from, to);
-      if (error) throw new Error(`Failed to read ${table}: ${error.message}`);
-      rows.push(...((data ?? []) as T[]));
-      if (!data || data.length < PAGE_SIZE) break;
+  for (const batch of chunks(ids, batchSize)) {
+    try {
+      rows.push(...await fetchByIdsBatch<T>(table, batch, select, column, orderColumn));
+    } catch (error) {
+      if (!isStatementTimeout(error) || batch.length === 1) throw error;
+      console.log(`  ⚠ Timeout lendo ${table}; reduzindo lote de ${batch.length} para consultas individuais.`);
+      for (const id of batch) {
+        rows.push(...await fetchByIdsBatch<T>(table, [id], select, column, orderColumn));
+      }
     }
   }
   return rows;
@@ -225,6 +386,23 @@ async function upsertBatches(table: string, rows: Row[], onConflict: string) {
     const { error } = await supabase.from(table).upsert(batch, { onConflict });
     if (error) throw new Error(`Failed to upsert ${table}: ${error.message}`);
   }
+}
+
+async function assertClassificationRunSchema() {
+  const checks = [
+    supabase.from("classification_runs").select("id, status, total_items").limit(1),
+    supabase.from("classification_run_items").select("run_id, target, item_id, status").limit(1),
+  ];
+  const results = await Promise.all(checks);
+  const error = results.find((result) => result.error)?.error;
+  if (!error) return;
+  throw new Error(
+    [
+      "O Supabase ainda não tem as tabelas de retomada do classificador.",
+      "Aplique a migração supabase/migrations/20260619000001_add_classification_runs.sql antes de rodar o script.",
+      `Erro do Supabase: ${error.message}`,
+    ].join("\n"),
+  );
 }
 
 async function assertLegislativeImpactSchema() {
@@ -244,12 +422,219 @@ async function assertLegislativeImpactSchema() {
 
   throw new Error(
     [
-      "O Supabase ainda não tem as colunas da metodologia N3 legislative-impact-v2.",
+      "O Supabase ainda não tem as colunas principais da metodologia N3.",
       "Aplique a migração supabase/migrations/20260619000000_add_legislative_impact_v2_analysis.sql antes de rodar nível 3.",
       "Com o projeto linkado, use: SUPABASE_DB_PASSWORD='senha-do-postgres' supabase db push --linked --yes",
       `Erro do Supabase: ${error.message}`,
     ].join("\n"),
   );
+}
+
+function errorKind(error: unknown) {
+  const message = errorMessage(error).toLocaleLowerCase("pt-BR");
+  if (message.includes("insufficient_quota") || message.includes("exceeded your current quota")) {
+    return "insufficient_quota";
+  }
+  if (message.includes("429") || message.includes("rate limit") || message.includes("too many requests")) {
+    return "rate_limit";
+  }
+  if (message.includes("json")) return "invalid_json";
+  if (message.includes("api")) return "api_error";
+  return "unknown";
+}
+
+function isHardQuotaError(error: unknown) {
+  return errorKind(error) === "insufficient_quota";
+}
+
+async function latestClassificationRun() {
+  const { data, error } = await supabase
+    .from("classification_runs")
+    .select("*")
+    .in("status", ["pending", "running", "paused", "failed"])
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to read classification_runs: ${error.message}`);
+  return data as ClassificationRunRow | null;
+}
+
+async function readClassificationRun(runId: string) {
+  const { data, error } = await supabase
+    .from("classification_runs")
+    .select("*")
+    .eq("id", runId)
+    .single();
+  if (error) throw new Error(`Failed to read classification_runs: ${error.message}`);
+  return data as ClassificationRunRow;
+}
+
+function runSummary(run: ClassificationRunRow | null) {
+  if (!run) return "nenhuma execução incompleta encontrada";
+  return [
+    `${run.id.slice(0, 8)} · ${run.status}`,
+    `alvo ${run.target}`,
+    `N${run.analysis_level}`,
+    `${run.classified_count}/${run.total_items} concluídos`,
+    `${run.failed_count} falhas`,
+    `${run.pending_count} pendentes`,
+    `leve ${run.provider ?? "sem provider"} / ${run.model ?? "sem modelo"}`,
+    run.strong_review_enabled ? `forte ${run.strong_provider ?? "sem provider"} / ${run.strong_model ?? "sem modelo"}` : "forte desativado",
+    new Date(run.updated_at).toLocaleString("pt-BR"),
+  ].join(" · ");
+}
+
+async function createClassificationRun(params: {
+  target: ClassifyTarget;
+  level: AnalysisLevel;
+  scope: ClassifyScope;
+  limit: number;
+  concurrency: number;
+  postProcessMode: PostProcessMode;
+  provider?: ProviderId;
+  model?: string;
+  strongReview?: {
+    enabled: boolean;
+    provider?: ProviderId;
+    model?: string;
+  };
+}) {
+  const { data, error } = await supabase
+    .from("classification_runs")
+    .insert({
+      target: params.target,
+      analysis_level: params.level,
+      scope: params.scope,
+      limit_per_target: params.limit,
+      concurrency: params.concurrency,
+      post_process_mode: params.postProcessMode,
+      provider: params.provider ?? null,
+      model: params.model ?? null,
+      strong_review_enabled: params.strongReview?.enabled ?? false,
+      strong_provider: params.strongReview?.enabled ? params.strongReview.provider ?? null : null,
+      strong_model: params.strongReview?.enabled ? params.strongReview.model ?? null : null,
+      method_version: params.level === 3 ? VOTE_METHODOLOGY_VERSION : publicValueClassificationMetadata().methodologyVersion,
+      status: "pending",
+    })
+    .select("*")
+    .single();
+  if (error) throw new Error(`Failed to create classification_runs: ${error.message}`);
+  return data as ClassificationRunRow;
+}
+
+async function updateRunStatus(runId: string, status: ClassificationRunStatus, lastError?: string) {
+  const now = new Date().toISOString();
+  const patch: Row = {
+    status,
+    updated_at: now,
+    last_error: lastError ?? null,
+  };
+  if (status === "running") patch.started_at = now;
+  if (status === "paused") patch.paused_at = now;
+  if (status === "completed" || status === "failed" || status === "cancelled") patch.finished_at = now;
+  const { error } = await supabase.from("classification_runs").update(patch).eq("id", runId);
+  if (error) throw new Error(`Failed to update classification_runs: ${error.message}`);
+}
+
+async function finishRunIfNotPaused(runId: string) {
+  const run = await readClassificationRun(runId);
+  if (run.status === "paused") return run;
+  const counts = await refreshRunCounts(runId);
+  const status: ClassificationRunStatus = counts.pending_count > 0 || counts.processing_count > 0
+    ? "paused"
+    : counts.failed_count > 0
+      ? "failed"
+      : "completed";
+  await updateRunStatus(runId, status, counts.failed_count > 0 ? `${counts.failed_count} itens falharam.` : undefined);
+  return readClassificationRun(runId);
+}
+
+async function refreshRunCounts(runId: string) {
+  const items = await fetchByIds<ClassificationRunItemRow>(
+    "classification_run_items",
+    [runId],
+    "run_id, status",
+    "run_id",
+  );
+  const count = (status: ClassificationRunItemStatus) => items.filter((item) => item.status === status).length;
+  const patch = {
+    total_items: items.length,
+    pending_count: count("pending"),
+    processing_count: count("processing"),
+    classified_count: count("classified"),
+    failed_count: count("failed"),
+    skipped_count: count("skipped"),
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase.from("classification_runs").update(patch).eq("id", runId);
+  if (error) throw new Error(`Failed to refresh classification_runs counts: ${error.message}`);
+  return patch;
+}
+
+async function upsertRunItems(runId: string, items: Array<{ target: "votes" | "proposals"; itemId: string; itemLabel?: string }>) {
+  await upsertBatches(
+    "classification_run_items",
+    items.map((item) => ({
+      run_id: runId,
+      target: item.target,
+      item_id: item.itemId,
+      item_label: item.itemLabel ?? item.itemId,
+      status: "pending",
+      error_kind: null,
+      error_message: null,
+      duration_ms: null,
+      updated_at: new Date().toISOString(),
+    })),
+    "run_id,target,item_id",
+  );
+  await refreshRunCounts(runId);
+}
+
+async function fetchRunItems(
+  runId: string,
+  target: "votes" | "proposals",
+  statuses: ClassificationRunItemStatus[],
+) {
+  const { data, error } = await supabase
+    .from("classification_run_items")
+    .select("id, run_id, target, item_id, item_label, status, error_kind, error_message, attempts, duration_ms")
+    .eq("run_id", runId)
+    .eq("target", target)
+    .in("status", statuses)
+    .order("id");
+  if (error) throw new Error(`Failed to read classification_run_items: ${error.message}`);
+  return (data ?? []) as ClassificationRunItemRow[];
+}
+
+async function markRunItemProcessing(item: ClassificationRunItemRow) {
+  const { error } = await supabase
+    .from("classification_run_items")
+    .update({
+      status: "processing",
+      attempts: item.attempts + 1,
+      started_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", item.id);
+  if (error) throw new Error(`Failed to mark run item processing: ${error.message}`);
+}
+
+async function markRunItemDone(item: ClassificationRunItemRow, status: "classified" | "failed" | "skipped", params: {
+  durationMs: number;
+  error?: unknown;
+}) {
+  const { error } = await supabase
+    .from("classification_run_items")
+    .update({
+      status,
+      error_kind: params.error ? errorKind(params.error) : null,
+      error_message: params.error ? errorMessage(params.error) : null,
+      duration_ms: Math.round(params.durationMs),
+      finished_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", item.id);
+  if (error) throw new Error(`Failed to mark run item ${status}: ${error.message}`);
 }
 
 function pairKey(legislatorId: number, periodId: string) {
@@ -332,6 +717,58 @@ function printEligibilityCounts(target: ClassifyTarget, counts: EligibilityCount
     console.log(`    Pendentes/melhoráveis: ${row.improvable}`);
     console.log(`    Sobrescrever mesmo nível/inferior: ${row.overwrite}`);
   }
+}
+
+async function prepareRunItemsForNewRun(params: {
+  runId: string;
+  target: ClassifyTarget;
+  level: AnalysisLevel;
+  scope: ClassifyScope;
+  limit: number;
+}) {
+  const items: Array<{ target: "votes" | "proposals"; itemId: string; itemLabel?: string }> = [];
+
+  if (params.target === "votes" || params.target === "both") {
+    const [votes, existing] = await Promise.all([
+      fetchAll<VoteRow>("votes", "id, vote_date, description, summary, url, session_number"),
+      fetchAll<{ vote_id: string; source: string | null; analysis_level: number | null }>(
+        "vote_classifications",
+        "vote_id, source, analysis_level",
+      ),
+    ]);
+    const existingMap = new Map(existing.map((row) => [row.vote_id, row]));
+    const candidates = votes
+      .filter((vote) => shouldClassify(existingMap.get(vote.id), params.level, params.scope))
+      .slice(0, params.limit);
+    items.push(...candidates.map((vote) => ({
+      target: "votes" as const,
+      itemId: vote.id,
+      itemLabel: shortText(vote.description || vote.id, 120),
+    })));
+  }
+
+  if (params.target === "proposals" || params.target === "both") {
+    const [proposals, existing] = await Promise.all([
+      fetchAll<ProposalRow>("proposals", "id, type, number, year, proposal_date, summary, status, url"),
+      fetchAll<{ proposal_id: string; source: string | null; analysis_level: number | null }>(
+        "proposal_classifications",
+        "proposal_id, source, analysis_level",
+        "proposal_id",
+      ),
+    ]);
+    const existingMap = new Map(existing.map((row) => [row.proposal_id, row]));
+    const candidates = proposals
+      .filter((proposal) => shouldClassify(existingMap.get(proposal.id), params.level, params.scope))
+      .slice(0, params.limit);
+    items.push(...candidates.map((proposal) => ({
+      target: "proposals" as const,
+      itemId: proposal.id,
+      itemLabel: `${proposal.type ?? "Proposição"} ${proposal.number ?? proposal.id}/${proposal.year ?? ""}`.replace(/\/$/, ""),
+    })));
+  }
+
+  await upsertRunItems(params.runId, items);
+  return items.length;
 }
 
 function cleanJson(text: string) {
@@ -502,15 +939,36 @@ Responda APENAS com JSON válido:
 function votePrompt(vote: VoteRow, level: AnalysisLevel, fullText?: FullTextResult) {
   const legislativeType = inferLegislativeType(`${vote.description ?? ""} ${vote.summary ?? ""}`);
   const voteObjectType = inferVoteObjectType(vote.description);
+  const voteObjectSubtype = inferVoteObjectSubtype(vote.description);
+  const voteObjectTextFound = voteObjectType === "main_bill" && Boolean(fullText);
+  const primaryTextUsed = voteObjectTextFound ? "vote_object" : fullText ? "related_bill" : "summary_only";
   const fullTextBlock = level === 3 && fullText
-    ? `\nTEXTO INTEGRAL DA PROPOSIÇÃO RELACIONADA:\n${fullText.text}\n`
+    ? `\nTEXTO OU RESUMO DA PROPOSIÇÃO RELACIONADA, APENAS COMO CONTEXTO:\n${fullText.text}\n`
     : "";
   if (level === 3) {
-    return `Você é um analista legislativo técnico, imparcial e conservador na aplicação de score.
-Avalie a votação pelo impacto público real e pelo objeto exato votado.
-Não classifique pelo título, ementa, resumo oficial ou intenção declarada.
-Nunca trate voto contra emenda, destaque ou substitutivo como voto contra o projeto inteiro.
-Nunca trate urgência ou requerimento como mérito automático.
+    return `Você é um classificador legislativo conservador em modo econômico com modelo mini. Retorne somente um objeto JSON válido.
+Metodologia: legislative-impact-v4-mini-first-safe-score.
+
+Objetivo:
+1. Identificar o objeto real da votação.
+2. Dizer o que o voto SIM fazia na prática.
+3. Dizer o que o voto NÃO fazia na prática.
+4. Classificar o efeito público com cautela.
+5. Marcar casos que precisam de revisão avançada.
+6. Não forçar pontuação quando houver ambiguidade.
+
+Regras obrigatórias:
+- Não julgue partido, governo, oposição ou ideologia.
+- Não use intenção presumida do parlamentar.
+- Não confunda projeto principal com emenda, destaque, substitutivo ou requerimento.
+- Se for urgência, retirada de pauta, adiamento, recurso, destaque ou requerimento, classifique como procedimental ou objeto específico.
+- Procedimental não deve receber impacto alto.
+- Se a votação for emenda, destaque, substitutivo ou votação em separado e o texto específico não estiver disponível, marque needsStrongReview = true.
+- Se o texto não permitir saber o mérito, use netPublicEffect = "insufficient" ou "unclear".
+- Se houver benefício e risco relevante, use netPublicEffect = "mixed".
+- Penalidade ou bônus só pode ocorrer com impacto claro, objeto claro e confidence >= 0.85.
+- Em caso de dúvida, escolha sem pontuação e needsStrongReview = true.
+- O mini não deve recomendar score alto em caso sensível.
 ${fullTextBlock}
 DADOS OFICIAIS DA VOTAÇÃO:
 ID: ${vote.id}
@@ -519,40 +977,52 @@ Descrição oficial: ${vote.description ?? ""}
 Resumo da proposição associada: ${vote.summary ?? ""}
 Tipo legislativo inferido: ${legislativeType}
 Objeto da votação inferido: ${voteObjectType}
+Subtipo inferido: ${voteObjectSubtype}
+Texto específico do objeto votado encontrado: ${voteObjectTextFound ? "sim" : "não"}
+Texto primário disponível nesta chamada: ${primaryTextUsed}
 
-Siga esta ordem: identifique o objeto exato, explique o que significava votar "sim" e "não", verifique se o texto analisado corresponde ao objeto votado, diferencie mérito de procedimento, identifique benefício declarado, custos escondidos, trade-offs, efeito público líquido, confiança e limite de impacto.
+TEXTO ESPECÍFICO DO OBJETO VOTADO:
+NAO DISPONIVEL
 
-Regras de segurança:
-- Se o objeto da votação não está claro, use voteObjectType = "unclear", publicInterestVote = "none" ou "any", confidence baixa e scoreImpactLimit = "none".
-- Se votação é procedimental sem efeito público direto claro, use isProceduralVote = true e scoreImpactLimit = "low".
-- Se for emenda/destaque/substitutivo e o texto específico não estiver disponível, use analyzedTextMatchesVoteObject = "unclear", confidence <= 0.6 e scoreImpactLimit = "low".
-- Só use scoreImpactLimit "high" ou "critical" com texto suficiente, objeto claro e efeito público direto.
-
-Retorne APENAS JSON válido:
+Retorne APENAS JSON válido neste formato:
 {
-  "analysisMethodVersion": "legislative-impact-v2",
-  "classification": "positive_public_interest | neutral | low_relevance | negative_public_interest | harmful_or_self_serving",
+  "analysisMethodVersion": "legislative-impact-v4-mini-first-safe-score",
+  "modelRole": "triage",
+  "classification": "positive_public_interest | neutral | low_relevance | negative_public_interest | harmful_or_self_serving | insufficient",
   "severity": "low | medium | high | critical",
-  "publicInterestVote": "yes | no | any | none",
+  "publicInterestVote": "yes | no | any | none | indeterminate",
   "confidence": 0.0,
   "isProceduralVote": true,
   "legislativeType": "PL | PLP | PEC | PDL | PRC | MPV | RIC | PFC | REQ | EMP | SBT | DTQ | VTS | RCP | MSC | INC | OUTRO | INCERTO",
   "decisionNature": "substantive_policy | constitutional_change | fiscal_budgetary | oversight_control | information_request | criminal_penalty | rights_expansion | rights_restriction | institutional_rule | symbolic | commemorative | procedural | unclear",
   "decisionScope": "national_policy | constitutional_rule | fiscal_effect | criminal_law | administrative_control | congressional_procedure | oversight | symbolic_only | local_or_specific | unclear",
-  "voteObjectType": "main_bill | amendment | substitute | highlight | urgency | procedural_request | postponement | agenda_withdrawal | appeal | other | unclear",
+  "voteObjectType": "main_bill | amendment | substitute | highlight | separate_vote | urgency | procedural_request | postponement | agenda_withdrawal | appeal | symbolic | fiscalization | other | unclear",
+  "voteObjectSubtype": "amendment | substitute | request | main_bill | none | unclear",
   "voteObjectDescription": "Objeto exato da votação.",
   "yesMeans": "O que votar sim aprovava, mantinha, acelerava ou apoiava.",
   "noMeans": "O que votar não rejeitava, bloqueava, mantinha fora ou impedia.",
+  "voteObjectTextFound": false,
+  "primaryTextUsed": "vote_object | related_bill | summary_only | unknown",
+  "usedRelatedBillAsMainEvidence": true,
   "analyzedTextMatchesVoteObject": "true | false | unclear",
   "scoreImpactLimit": "none | low | medium | high | critical",
+  "recommendedScoreImpact": 0,
   "declaredBenefit": "Benefício aparente ou declarado.",
   "hiddenCost": "Custo escondido, exceção, revogação, trade-off ou efeito colateral.",
-  "netPublicEffect": "positive | negative | mixed | unclear",
+  "netPublicEffect": "positive | negative | mixed | neutral | unclear | insufficient",
   "hasTradeoff": true,
   "summaryMatchesText": "true | false | unclear",
-  "riskFlags": ["benefit_offset_by_hidden_cost | hidden_revocation | scope_mismatch | unrelated_amendment | jabuti | privilege_or_benefit | corporate_or_category_benefit | economic_group_benefit | fiscal_impact | transparency_reduction | oversight_reduction | constitutional_risk | increased_workload | increased_cost_or_tax | increased_bureaucracy | reduced_rights | procedural_only | vote_object_unclear | text_does_not_match_vote_object | insufficient_text | none"],
-  "criticalArticles": [{ "article": "Art. X", "issue": "Explicação curta do ponto de atenção." }],
-  "reason": "Explicação curta em português dizendo objeto, sim/não, benefício aparente, custo escondido, efeito líquido e voto alinhado."
+  "riskLevel": "low | medium | high | critical",
+  "needsStrongReview": true,
+  "analysisStatus": "validated | neutral_validated | pending_strong_review | insufficient_data | mixed_requires_review | procedural_low_confidence | not_eligible | failed_parsing",
+  "affectsScore": false,
+  "scorePoints": null,
+  "reviewReason": "Motivo curto para revisão avançada ou para não precisar dela.",
+  "coverageCategory": "scored | neutral_analyzed | pending_review | insufficient | not_eligible",
+  "riskFlags": ["benefit_offset_by_hidden_cost | hidden_revocation | scope_mismatch | unrelated_amendment | jabuti | privilege_or_benefit | corporate_or_category_benefit | economic_group_benefit | fiscal_impact | transparency_reduction | oversight_reduction | constitutional_risk | increased_workload | increased_cost_or_tax | increased_bureaucracy | reduced_rights | procedural_only | vote_object_unclear | text_does_not_match_vote_object | insufficient_vote_object_text | hidden_exception | sector_specific_benefit | insufficient_text | none"],
+  "criticalArticles": [{ "article": "Art. X", "appearsInVoteObjectText": true, "issue": "Explicação curta do ponto de atenção." }],
+  "scoreSafetyReason": "Motivo curto para zerar, limitar ou permitir impacto no score.",
+  "reason": "Explicação curta em português dizendo objeto, sim/não, benefício aparente, custo escondido, efeito líquido e voto alinhado ou bloqueio de score."
 }`;
   }
   return `Você é um analista político sênior especializado no processo legislativo brasileiro.
@@ -593,6 +1063,38 @@ Responda APENAS com JSON válido:
 }`;
 }
 
+function strongVotePrompt(vote: VoteRow, fullText: FullTextResult | undefined, triage: VoteLlmResult) {
+  return votePrompt(vote, 3, fullText)
+    .replace(
+      "Você é um classificador legislativo conservador em modo econômico com modelo mini.",
+      "Você é um revisor legislativo avançado e conservador usando modelo forte.",
+    )
+    .replace("5. Marcar casos que precisam de revisão avançada.", "5. Resolver somente os casos que tenham evidência textual suficiente.")
+    .replace("6. Não forçar pontuação quando houver ambiguidade.", "6. Manter pendente/null quando ainda houver ambiguidade.")
+    .replace("- Penalidade ou bônus só pode ocorrer com impacto claro, objeto claro e confidence >= 0.85.", "- Penalidade ou bônus só pode ocorrer com impacto claro, objeto claro, texto compatível e confidence >= 0.70.")
+    .replace("- Em caso de dúvida, escolha sem pontuação e needsStrongReview = true.", "- Em caso de dúvida, mantenha sem pontuação e needsStrongReview = true.")
+    .replace("- O mini não deve recomendar score alto em caso sensível.", "- O modelo forte também não deve pontuar quando o texto específico do objeto votado não estiver disponível.")
+    .replace('"modelRole": "triage"', '"modelRole": "strong_review"')
+    .replace(
+      "Retorne APENAS JSON válido neste formato:",
+      `TRIAGEM LEVE JÁ FEITA:
+${JSON.stringify({
+  classification: triage.classification,
+  publicInterestVote: triage.publicInterestVote,
+  confidence: triage.confidence,
+  voteObjectType: triage.voteObjectType,
+  voteObjectDescription: triage.voteObjectDescription,
+  netPublicEffect: triage.netPublicEffect,
+  needsStrongReview: triage.needsStrongReview,
+  reviewReason: triage.reviewReason,
+  scoreSafetyReason: triage.scoreSafetyReason,
+  reason: triage.reason,
+}).slice(0, 4_000)}
+
+Retorne APENAS JSON válido neste formato:`,
+    );
+}
+
 function parseProposalResult(text: string): ProposalLlmResult {
   const parsed = JSON.parse(cleanJson(text)) as Partial<ProposalLlmResult>;
   const categories = Object.keys(PUBLIC_VALUE_CATEGORIES);
@@ -631,9 +1133,11 @@ function parseProposalResult(text: string): ProposalLlmResult {
 function parseVoteResult(text: string): VoteLlmResult {
   const parsed = JSON.parse(cleanJson(text)) as Partial<VoteLlmResult>;
   const classifications = ["positive_public_interest", "neutral", "low_relevance", "negative_public_interest", "harmful_or_self_serving"];
+  const rawClassification = String((parsed as Partial<VoteLlmResult> & { classification?: string }).classification ?? "");
   const severities = ["low", "medium", "high", "critical"];
-  const publicVotes = ["yes", "no", "any", "none"];
-  if (!parsed.classification || !classifications.includes(parsed.classification)) {
+  const publicVotes = ["yes", "no", "any", "none", "indeterminate"];
+  const storedClassification = rawClassification === "insufficient" ? "neutral" : rawClassification;
+  if (!storedClassification || !classifications.includes(storedClassification)) {
     throw new Error(`classificação inválida: ${parsed.classification}`);
   }
   if (!parsed.severity || !severities.includes(parsed.severity)) {
@@ -647,7 +1151,7 @@ function parseVoteResult(text: string): VoteLlmResult {
   }
   const result = normalizeVoteAnalysis({
     voteId: "",
-    classification: parsed.classification,
+    classification: storedClassification as PublicVoteClassification,
     severity: parsed.severity,
     publicInterestVote: parsed.publicInterestVote,
     confidence: clampConfidence(parsed.confidence),
@@ -656,11 +1160,27 @@ function parseVoteResult(text: string): VoteLlmResult {
     decisionNature: parsed.decisionNature,
     decisionScope: parsed.decisionScope,
     voteObjectType: parsed.voteObjectType,
+    voteObjectSubtype: parsed.voteObjectSubtype,
     voteObjectDescription: parsed.voteObjectDescription,
     yesMeans: parsed.yesMeans,
     noMeans: parsed.noMeans,
+    voteObjectTextFound: parsed.voteObjectTextFound,
+    primaryTextUsed: parsed.primaryTextUsed,
+    usedRelatedBillAsMainEvidence: parsed.usedRelatedBillAsMainEvidence,
     analyzedTextMatchesVoteObject: parsed.analyzedTextMatchesVoteObject,
     scoreImpactLimit: parsed.scoreImpactLimit,
+    recommendedScoreImpact: parsed.recommendedScoreImpact,
+    scoreSafetyReason: parsed.scoreSafetyReason,
+    modelRecommendation: parsed.modelRecommendation,
+    modelUsed: parsed.modelUsed,
+    modelRole: parsed.modelRole,
+    riskLevel: parsed.riskLevel,
+    analysisStatus: parsed.analysisStatus,
+    affectsScore: parsed.affectsScore,
+    scorePoints: parsed.scorePoints,
+    needsStrongReview: parsed.needsStrongReview,
+    reviewReason: parsed.reviewReason,
+    coverageCategory: parsed.coverageCategory,
     declaredBenefit: parsed.declaredBenefit,
     hiddenCost: parsed.hiddenCost,
     netPublicEffect: parsed.netPublicEffect,
@@ -674,9 +1194,188 @@ function parseVoteResult(text: string): VoteLlmResult {
     reviewedManually: false,
     methodologyVersion: VOTE_METHODOLOGY_VERSION,
     analysisMethodVersion: parsed.analysisMethodVersion,
-    analysisPayload: parsed as Record<string, unknown>,
+    analysisPayload: { ...(parsed as Record<string, unknown>), rawClassification },
   });
-  return { ...result, analysisPayload: parsed as Record<string, unknown> };
+  return { ...result, rawClassification, analysisPayload: { ...(parsed as Record<string, unknown>), rawClassification } };
+}
+
+function finalizeVoteResult(
+  parsed: VoteLlmResult,
+  vote: VoteRow,
+  model: string,
+  fullText?: FullTextResult,
+  options: {
+    modelRole?: ModelRole;
+    previousAnalysis?: VoteLlmResult;
+  } = {},
+): VoteLlmResult {
+  const modelRole = options.modelRole ?? parsed.modelRole ?? "triage";
+  const minConfidence = modelRole === "strong_review" ? 0.7 : 0.85;
+  const riskBlockReason = modelRole === "strong_review"
+    ? "Risco alto/crítico mesmo após revisão forte."
+    : "Risco alto detectado. Mini não pode aplicar pontuação.";
+  const fallbackObjectType = inferVoteObjectType(vote.description);
+  const fallbackSubtype = inferVoteObjectSubtype(vote.description);
+  const voteObjectType = parsed.voteObjectType ?? fallbackObjectType;
+  const voteObjectSubtype = parsed.voteObjectSubtype ?? fallbackSubtype;
+  const specificObject = isSpecificVoteObject(voteObjectType);
+  const defaultVoteObjectTextFound = voteObjectType === "main_bill" && Boolean(fullText);
+  const defaultPrimaryTextUsed: PrimaryTextUsed = defaultVoteObjectTextFound ? "vote_object" : fullText ? "related_bill" : "summary_only";
+  const primaryTextUsed: PrimaryTextUsed = parsed.primaryTextUsed ?? defaultPrimaryTextUsed;
+  const voteObjectTextFound = parsed.voteObjectTextFound ?? defaultVoteObjectTextFound;
+  const usedRelatedBillAsMainEvidence = parsed.usedRelatedBillAsMainEvidence ?? primaryTextUsed === "related_bill";
+  const riskFlags = new Set<RiskFlag>(parsed.riskFlags ?? []);
+  if (riskFlags.size === 0) riskFlags.add("none");
+
+  let publicInterestVote = parsed.publicInterestVote;
+  let scoreImpactLimit = parsed.scoreImpactLimit ?? "low";
+  let recommendedScoreImpact = parsed.recommendedScoreImpact ?? 0;
+  let confidence = clampConfidence(parsed.confidence);
+  let scoreSafetyReason = parsed.scoreSafetyReason ?? "";
+  let analyzedTextMatchesVoteObject = parsed.analyzedTextMatchesVoteObject ?? "unclear";
+  let riskLevel = parsed.riskLevel ?? "low";
+  let needsStrongReview = parsed.needsStrongReview ?? false;
+  let analysisStatus = parsed.analysisStatus ?? "validated";
+  let affectsScore = parsed.affectsScore ?? true;
+  let scorePoints = parsed.scorePoints ?? recommendedScoreImpact;
+  let reviewReason = parsed.reviewReason ?? "Não precisa revisão avançada.";
+  let coverageCategory = parsed.coverageCategory ?? "scored";
+
+  if (specificObject && (!voteObjectTextFound || primaryTextUsed !== "vote_object" || usedRelatedBillAsMainEvidence)) {
+    riskFlags.delete("none");
+    riskFlags.add("scope_mismatch");
+    riskFlags.add("insufficient_vote_object_text");
+    publicInterestVote = publicInterestVote === "yes" || publicInterestVote === "no" ? "indeterminate" : publicInterestVote;
+    scoreImpactLimit = "none";
+    recommendedScoreImpact = 0;
+    scorePoints = null;
+    affectsScore = false;
+    needsStrongReview = true;
+    analysisStatus = "pending_strong_review";
+    coverageCategory = "pending_review";
+    riskLevel = riskLevel === "critical" ? "critical" : "high";
+    confidence = Math.min(confidence, 0.55);
+    analyzedTextMatchesVoteObject = analyzedTextMatchesVoteObject === "true" ? "unclear" : analyzedTextMatchesVoteObject;
+    reviewReason = "Texto específico do objeto votado não foi encontrado; requer revisão avançada.";
+    scoreSafetyReason ||= reviewReason;
+  }
+
+  if (parsed.netPublicEffect === "mixed" || parsed.netPublicEffect === "unclear" || parsed.netPublicEffect === "insufficient") {
+    scoreImpactLimit = "none";
+    recommendedScoreImpact = 0;
+    scorePoints = null;
+    affectsScore = false;
+    needsStrongReview = true;
+    analysisStatus = parsed.netPublicEffect === "mixed" ? "mixed_requires_review" : "insufficient_data";
+    coverageCategory = parsed.netPublicEffect === "mixed" ? "pending_review" : "insufficient";
+    if (publicInterestVote === "yes" || publicInterestVote === "no") publicInterestVote = parsed.netPublicEffect === "mixed" ? "any" : "indeterminate";
+    reviewReason = parsed.netPublicEffect === "mixed"
+      ? "Efeito público misto. Ambos os votos podem ser defensáveis."
+      : "Dados insuficientes para pontuação segura.";
+    scoreSafetyReason ||= reviewReason;
+  }
+
+  const criticalArticleMismatch = parsed.criticalArticles?.some((article) => article.appearsInVoteObjectText === false) === true;
+  if (criticalArticleMismatch) {
+    riskFlags.delete("none");
+    riskFlags.add("scope_mismatch");
+    riskFlags.add("text_does_not_match_vote_object");
+    publicInterestVote = "indeterminate";
+    scoreImpactLimit = "none";
+    recommendedScoreImpact = 0;
+    scorePoints = null;
+    affectsScore = false;
+    needsStrongReview = true;
+    analysisStatus = "pending_strong_review";
+    coverageCategory = "pending_review";
+    riskLevel = riskLevel === "critical" ? "critical" : "high";
+    confidence = Math.min(confidence, 0.55);
+    reviewReason = "A análise citou artigo que não pertence ao objeto exato votado.";
+    scoreSafetyReason ||= reviewReason;
+  }
+
+  if (confidence < minConfidence || riskLevel === "high" || riskLevel === "critical") {
+    if (analysisStatus === "validated") analysisStatus = "pending_strong_review";
+    if (coverageCategory === "scored") coverageCategory = "pending_review";
+    needsStrongReview = true;
+    affectsScore = false;
+    scorePoints = null;
+    recommendedScoreImpact = 0;
+    scoreImpactLimit = "none";
+    reviewReason = confidence < minConfidence
+      ? modelRole === "strong_review" ? "Confiança abaixo do mínimo para pontuar mesmo com revisão forte." : "Confiança abaixo do mínimo para pontuar com mini."
+      : riskBlockReason;
+    scoreSafetyReason ||= reviewReason;
+  }
+
+  if (analysisStatus === "neutral_validated") {
+    affectsScore = false;
+    needsStrongReview = false;
+    scorePoints = 0;
+    recommendedScoreImpact = 0;
+    coverageCategory = "neutral_analyzed";
+  }
+
+  const payload = {
+    ...(parsed.analysisPayload ?? parsed),
+    ...parsed,
+    analysisMethodVersion: LEGISLATIVE_IMPACT_V4_VERSION,
+    modelRecommendation: modelRole === "strong_review" ? "strong_model_required" : parsed.modelRecommendation ?? "mini_allowed_for_triage",
+    modelRole,
+    modelUsed: model,
+    previousAnalysis: options.previousAnalysis?.analysisPayload ?? options.previousAnalysis,
+    voteObjectType,
+    voteObjectSubtype,
+    voteObjectTextFound,
+    primaryTextUsed,
+    usedRelatedBillAsMainEvidence,
+    analyzedTextMatchesVoteObject,
+    publicInterestVote,
+    scoreImpactLimit,
+    recommendedScoreImpact,
+    scorePoints,
+    affectsScore,
+    analysisStatus,
+    needsStrongReview,
+    reviewReason,
+    coverageCategory,
+    riskLevel,
+    confidence,
+    riskFlags: Array.from(riskFlags),
+    scoreSafetyReason,
+  } satisfies Record<string, unknown>;
+
+  return {
+    ...parsed,
+    analysisMethodVersion: LEGISLATIVE_IMPACT_V4_VERSION,
+    modelRecommendation: modelRole === "strong_review" ? "strong_model_required" : parsed.modelRecommendation ?? "mini_allowed_for_triage",
+    modelRole,
+    modelUsed: model,
+    voteObjectType,
+    voteObjectSubtype,
+    voteObjectTextFound,
+    primaryTextUsed,
+    usedRelatedBillAsMainEvidence,
+    analyzedTextMatchesVoteObject,
+    publicInterestVote,
+    scoreImpactLimit,
+    recommendedScoreImpact,
+    scorePoints,
+    affectsScore,
+    analysisStatus,
+    needsStrongReview,
+    reviewReason,
+    coverageCategory,
+    riskLevel,
+    confidence,
+    riskFlags: Array.from(riskFlags),
+    scoreSafetyReason,
+    analysisPayload: payload,
+  };
+}
+
+function isSpecificVoteObject(type: VoteObjectType) {
+  return type === "amendment" || type === "highlight" || type === "substitute" || type === "separate_vote";
 }
 
 async function generateJsonResult<T>(params: {
@@ -736,7 +1435,16 @@ function proposalAnalysisColumns(parsed: ProposalLlmResult, fallbackType: Legisl
 
 function voteAnalysisColumns(parsed: VoteLlmResult, fallbackType: LegislativeType, fallbackObjectType: VoteObjectType) {
   return {
-    analysis_method_version: parsed.analysisMethodVersion ?? "legislative-impact-v2",
+    analysis_method_version: parsed.analysisMethodVersion ?? VOTE_METHODOLOGY_VERSION,
+    model_used: parsed.modelUsed ?? "",
+    model_role: parsed.modelRole ?? "triage",
+    analysis_status: parsed.analysisStatus ?? "pending_strong_review",
+    risk_level: parsed.riskLevel ?? "low",
+    needs_strong_review: parsed.needsStrongReview ?? false,
+    review_reason: parsed.reviewReason ?? "",
+    coverage_category: parsed.coverageCategory ?? "pending_review",
+    affects_score: parsed.affectsScore ?? false,
+    score_safety_reason: parsed.scoreSafetyReason ?? "",
     legislative_type: parsed.legislativeType ?? fallbackType,
     decision_nature: parsed.decisionNature ?? "unclear",
     decision_scope: parsed.decisionScope ?? "unclear",
@@ -756,6 +1464,10 @@ function voteAnalysisColumns(parsed: VoteLlmResult, fallbackType: LegislativeTyp
     critical_articles: jsonArray(parsed.criticalArticles),
     analysis_payload: parsed.analysisPayload ?? parsed,
   };
+}
+
+function dbPublicInterestVote(value: PublicInterestVote) {
+  return value === "indeterminate" ? "none" : value;
 }
 
 async function runWithConcurrency<T>(items: T[], concurrency: number, worker: (item: T, index: number) => Promise<void>) {
@@ -859,51 +1571,101 @@ async function updateProposalMetrics(proposalIds: string[]) {
   return metricRows.length;
 }
 
-async function updateLegislatorVotes(analyses: Map<string, PublicVoteAnalysis>) {
+async function updateLegislatorVotes(
+  analyses: Map<string, PublicVoteAnalysis>,
+  options: { label?: string; processed?: number; total?: number } = {},
+) {
   if (analyses.size === 0) return new Set<string>();
-  const links = await fetchByIds<LegislatorVoteRow>(
-    "legislator_votes",
-    [...analyses.keys()],
-    "id, legislator_id, vote_id, period_id, candidate_vote, score_delta, confidence",
-    "vote_id",
-  );
   const affectedPairs = new Set<string>();
-  const rows = links.flatMap((link) => {
-    const analysis = analyses.get(link.vote_id);
-    if (!analysis) return [];
-    const record = buildPublicVoteRecord(analysis, link.legislator_id, link.candidate_vote);
-    affectedPairs.add(pairKey(link.legislator_id, link.period_id));
-    return [{
-      id: link.id,
-      legislator_id: link.legislator_id,
-      vote_id: link.vote_id,
-      period_id: link.period_id,
-      candidate_vote: link.candidate_vote,
-      score_delta: record.scoreDelta,
-      confidence: record.confidence,
-      reason: record.reason,
-      source: record.source,
-      reviewed_manually: record.reviewedManually,
-    }];
-  });
+  let processedVotes = 0;
+  for (const voteIds of chunks([...analyses.keys()], VOTE_LINK_READ_BATCH_SIZE)) {
+    const links = await fetchByIds<LegislatorVoteRow>(
+      "legislator_votes",
+      voteIds,
+      "id, legislator_id, vote_id, period_id, candidate_vote, score_delta, confidence",
+      "vote_id",
+      VOTE_LINK_READ_BATCH_SIZE,
+    );
+    const rows = links.flatMap((link) => {
+      const analysis = analyses.get(link.vote_id);
+      if (!analysis) return [];
+      const record = buildPublicVoteRecord(analysis, link.legislator_id, link.candidate_vote);
+      affectedPairs.add(pairKey(link.legislator_id, link.period_id));
+      return [{
+        id: link.id,
+        legislator_id: link.legislator_id,
+        vote_id: link.vote_id,
+        period_id: link.period_id,
+        candidate_vote: link.candidate_vote,
+        score_delta: record.scoreDelta,
+        score_points: record.scorePoints,
+        affects_score: record.affectsScore,
+        analysis_status: record.analysisStatus,
+        needs_strong_review: record.needsStrongReview,
+        review_reason: record.reviewReason,
+        coverage_category: record.coverageCategory,
+        score_safety_reason: record.scoreSafetyReason,
+        model_used: record.modelUsed,
+        model_role: record.modelRole,
+        confidence: record.confidence,
+        reason: record.reason,
+        source: record.source,
+        reviewed_manually: record.reviewedManually,
+      }];
+    });
 
-  await upsertBatches("legislator_votes", rows, "id");
+    await upsertBatches("legislator_votes", rows, "id");
+    processedVotes += voteIds.length;
+    if (options.label) {
+      const done = (options.processed ?? 0) + processedVotes;
+      const total = options.total ?? analyses.size;
+      console.log(`${options.label}: vínculos atualizados para ${done}/${total} votações; pares afetados até agora: ${affectedPairs.size}`);
+    }
+  }
   return affectedPairs;
+}
+
+async function fetchLegislatorVotesForPairs(affectedPairs: Set<string>) {
+  const grouped = new Map<string, Set<number>>();
+  for (const key of affectedPairs) {
+    const [legislatorId, periodId] = key.split("|");
+    const ids = grouped.get(periodId) ?? new Set<number>();
+    ids.add(Number(legislatorId));
+    grouped.set(periodId, ids);
+  }
+
+  const rows: LegislatorVoteRow[] = [];
+  for (const [periodId, legislatorIds] of grouped) {
+    for (const legislatorBatch of chunks([...legislatorIds], METRIC_LEGISLATOR_READ_BATCH_SIZE)) {
+      for (let from = 0; ; from += PAGE_SIZE) {
+        const to = from + PAGE_SIZE - 1;
+        const { data, error } = await supabase
+          .from("legislator_votes")
+          .select("id, legislator_id, vote_id, period_id, candidate_vote, score_delta, score_points, confidence, affects_score, analysis_status")
+          .eq("period_id", periodId)
+          .in("legislator_id", legislatorBatch)
+          .order("id")
+          .range(from, to);
+        if (error) throw new Error(`Failed to read legislator_votes: ${error.message}`);
+        rows.push(...((data ?? []) as LegislatorVoteRow[]));
+        if (!data || data.length < PAGE_SIZE) break;
+      }
+    }
+  }
+  return rows;
 }
 
 async function updateVoteMetrics(affectedPairs: Set<string>) {
   if (affectedPairs.size === 0) return 0;
-  const periodIds = [...new Set([...affectedPairs].map((key) => key.split("|")[1]))];
-  const rows = await fetchByIds<LegislatorVoteRow>(
-    "legislator_votes",
-    periodIds,
-    "id, legislator_id, vote_id, period_id, candidate_vote, score_delta, confidence",
-    "period_id",
-  );
   const groups = new Map<string, LegislatorVoteRow[]>();
+  const rows = await fetchLegislatorVotesForPairs(affectedPairs);
+
   for (const row of rows) {
+    const hasValidatedStatus = row.analysis_status === "validated" || row.analysis_status === "neutral_validated";
+    const hasLegacyAnalysis = !row.analysis_status && row.confidence !== null;
+    if (!hasValidatedStatus && !hasLegacyAnalysis) continue;
     const key = pairKey(row.legislator_id, row.period_id);
-    if (!affectedPairs.has(key) || row.confidence === null) continue;
+    if (!affectedPairs.has(key)) continue;
     groups.set(key, [...(groups.get(key) ?? []), row]);
   }
 
@@ -916,6 +1678,11 @@ async function updateVoteMetrics(affectedPairs: Set<string>) {
     let confidence = 0;
 
     for (const vote of votes) {
+      const affectsScore = vote.affects_score === true || (!vote.analysis_status && vote.confidence !== null);
+      if (!affectsScore) {
+        confidence += Number(vote.confidence ?? 0);
+        continue;
+      }
       const delta = Number(vote.score_delta ?? 0);
       if (delta > 0) positive += delta;
       else if (delta < 0 && vote.candidate_vote === "absent") absencePenalties += Math.abs(delta);
@@ -940,35 +1707,120 @@ async function updateVoteMetrics(affectedPairs: Set<string>) {
   return metricRows.length;
 }
 
+function voteAnalysisFromClassification(row: VoteClassificationRow): PublicVoteAnalysis {
+  const payload = row.analysis_payload ?? {};
+  return normalizeVoteAnalysis({
+    voteId: row.vote_id,
+    classification: row.classification,
+    severity: row.severity,
+    publicInterestVote: row.public_interest_vote,
+    confidence: Number(row.confidence ?? 0),
+    isProceduralVote: row.is_procedural_vote ?? false,
+    legislativeType: row.legislative_type ?? undefined,
+    decisionNature: row.decision_nature ?? undefined,
+    decisionScope: row.decision_scope ?? undefined,
+    voteObjectType: row.vote_object_type ?? undefined,
+    voteObjectSubtype: typeof payload.voteObjectSubtype === "string" ? payload.voteObjectSubtype as VoteObjectSubtype : undefined,
+    voteObjectDescription: row.vote_object_description ?? undefined,
+    yesMeans: row.yes_means ?? undefined,
+    noMeans: row.no_means ?? undefined,
+    voteObjectTextFound: typeof payload.voteObjectTextFound === "boolean" ? payload.voteObjectTextFound : undefined,
+    primaryTextUsed: typeof payload.primaryTextUsed === "string" ? payload.primaryTextUsed as PrimaryTextUsed : undefined,
+    usedRelatedBillAsMainEvidence: typeof payload.usedRelatedBillAsMainEvidence === "boolean" ? payload.usedRelatedBillAsMainEvidence : undefined,
+    analyzedTextMatchesVoteObject: row.analyzed_text_matches_vote_object ?? undefined,
+    scoreImpactLimit: row.score_impact_limit ?? undefined,
+    recommendedScoreImpact: typeof payload.recommendedScoreImpact === "number" ? payload.recommendedScoreImpact : undefined,
+    scoreSafetyReason: row.score_safety_reason ?? (typeof payload.scoreSafetyReason === "string" ? payload.scoreSafetyReason : undefined),
+    modelRecommendation: typeof payload.modelRecommendation === "string" ? payload.modelRecommendation as ModelRecommendation : undefined,
+    modelUsed: row.model_used ?? (typeof payload.modelUsed === "string" ? payload.modelUsed : undefined),
+    modelRole: row.model_role ?? (typeof payload.modelRole === "string" ? payload.modelRole as ModelRole : undefined),
+    riskLevel: row.risk_level ?? (typeof payload.riskLevel === "string" ? payload.riskLevel as RiskLevel : undefined),
+    analysisStatus: row.analysis_status ?? (typeof payload.analysisStatus === "string" ? payload.analysisStatus as AnalysisStatus : undefined),
+    affectsScore: row.affects_score ?? (typeof payload.affectsScore === "boolean" ? payload.affectsScore : undefined),
+    needsStrongReview: row.needs_strong_review ?? (typeof payload.needsStrongReview === "boolean" ? payload.needsStrongReview : undefined),
+    reviewReason: row.review_reason ?? (typeof payload.reviewReason === "string" ? payload.reviewReason : undefined),
+    coverageCategory: row.coverage_category ?? (typeof payload.coverageCategory === "string" ? payload.coverageCategory as CoverageCategory : undefined),
+    declaredBenefit: row.declared_benefit ?? undefined,
+    hiddenCost: row.hidden_cost ?? undefined,
+    netPublicEffect: row.net_public_effect ?? undefined,
+    hasTradeoff: row.has_tradeoff ?? false,
+    summaryMatchesText: row.summary_matches_text ?? undefined,
+    riskFlags: row.risk_flags ?? undefined,
+    criticalArticles: row.critical_articles ?? undefined,
+    reason: row.reason,
+    source: row.source,
+    analysisLevel: row.analysis_level === 3 ? 3 : 2,
+    reviewedManually: row.reviewed_manually ?? false,
+    methodologyVersion: row.methodology_version ?? VOTE_METHODOLOGY_VERSION,
+    analysisMethodVersion: row.analysis_method_version ?? undefined,
+    analysisPayload: payload,
+  });
+}
+
+async function materializeVoteScores(limit: number) {
+  const classifications = await fetchAll<VoteClassificationRow>(
+    "vote_classifications",
+    "vote_id, classification, severity, public_interest_vote, confidence, reason, source, analysis_level, reviewed_manually, methodology_version, analysis_method_version, legislative_type, decision_nature, decision_scope, vote_object_type, vote_object_description, yes_means, no_means, analyzed_text_matches_vote_object, score_impact_limit, is_procedural_vote, declared_benefit, hidden_cost, net_public_effect, has_tradeoff, summary_matches_text, risk_flags, critical_articles, analysis_payload, model_used, model_role, analysis_status, risk_level, needs_strong_review, review_reason, coverage_category, affects_score, score_safety_reason",
+    "vote_id",
+  );
+  const toProcess = classifications.slice(0, limit);
+
+  console.log(`\nMaterialização: ${classifications.length} classificações disponíveis; processando ${toProcess.length}`);
+  console.log("Materialização: atualizando votos dos parlamentares vinculados...");
+  const affectedPairs = new Set<string>();
+  let processed = 0;
+  for (const batch of chunks(toProcess, MATERIALIZE_CLASSIFICATION_BATCH_SIZE)) {
+    const analyses = new Map(batch.map((row) => [row.vote_id, voteAnalysisFromClassification(row)]));
+    const batchPairs = await updateLegislatorVotes(analyses, {
+      label: "Materialização",
+      processed,
+      total: toProcess.length,
+    });
+    for (const key of batchPairs) affectedPairs.add(key);
+    processed += batch.length;
+    console.log(`Materialização: ${processed}/${toProcess.length} votações materializadas; ${affectedPairs.size} pares únicos afetados.`);
+  }
+  console.log(`Materialização: ${affectedPairs.size} pares parlamentar/período afetados; recalculando métricas...`);
+  const metricRows = await updateVoteMetrics(affectedPairs);
+  console.log(`Materialização: ${metricRows} linhas de métricas recalculadas.`);
+  return { classified: 0, failed: 0, skipped: 0, linksUpdated: affectedPairs.size, metricRows };
+}
+
 async function classifyProposals(params: {
   level: AnalysisLevel;
-  scope: ClassifyScope;
-  limit: number;
-  provider: ReturnType<typeof getProvider>;
+  runId: string;
+  runMode: ClassificationRunMode;
+  provider: ModelSelection["provider"];
   model: string;
   concurrency: number;
+  postProcessMode: PostProcessMode;
 }) {
   const metadata = publicValueClassificationMetadata();
-  const [proposals, existing] = await Promise.all([
-    fetchAll<ProposalRow>("proposals", "id, type, number, year, proposal_date, summary, status, url"),
-    fetchAll<{ proposal_id: string; source: string | null; analysis_level: number | null }>(
-      "proposal_classifications",
-      "proposal_id, source, analysis_level",
-      "proposal_id",
-    ),
-  ]);
-  const existingMap = new Map(existing.map((row) => [row.proposal_id, row]));
-  const candidates = proposals.filter((proposal) => shouldClassify(existingMap.get(proposal.id), params.level, params.scope));
-  const toProcess = candidates.slice(0, params.limit);
+  const statuses: ClassificationRunItemStatus[] = params.runMode === "retry_failed"
+    ? ["failed"]
+    : ["pending", "processing", "failed"];
+  const runItems = await fetchRunItems(params.runId, "proposals", statuses);
+  const proposals = await fetchByIds<ProposalRow>(
+    "proposals",
+    runItems.map((item) => item.item_id),
+    "id, type, number, year, proposal_date, summary, status, url",
+  );
+  const proposalMap = new Map(proposals.map((proposal) => [proposal.id, proposal]));
+  const toProcess = runItems.map((item) => ({ item, proposal: proposalMap.get(item.item_id) }));
   const updatedProposalIds: string[] = [];
   const recentDurations: number[] = [];
   const runStartedAt = Date.now();
   let failed = 0;
+  let pausedError: unknown = null;
 
-  console.log(`\nProposições elegíveis: ${candidates.length}; processando ${toProcess.length}`);
-  await runWithConcurrency(toProcess, params.concurrency, async (proposal, index) => {
+  console.log(`\nProposições no run: ${runItems.length}; processando ${toProcess.length}`);
+  await runWithConcurrency(toProcess, params.concurrency, async (task, index) => {
+    if (pausedError) return;
+    const { item, proposal } = task;
     const start = performance.now();
-    const label = `${proposal.type ?? "Proposição"} ${proposal.number ?? proposal.id}/${proposal.year ?? ""}`.replace(/\/$/, "");
+    const label = proposal
+      ? `${proposal.type ?? "Proposição"} ${proposal.number ?? proposal.id}/${proposal.year ?? ""}`.replace(/\/$/, "")
+      : item.item_label ?? item.item_id;
     progressLine({
       index,
       total: toProcess.length,
@@ -976,6 +1828,13 @@ async function classifyProposals(params: {
       recentDurations,
       label,
     });
+    await markRunItemProcessing(item);
+    if (!proposal) {
+      const elapsedMs = recordDuration(recentDurations, start);
+      await markRunItemDone(item, "skipped", { durationMs: elapsedMs, error: new Error("Proposição não encontrada no banco") });
+      console.log("  ⚠ Proposição não encontrada; item pulado.");
+      return;
+    }
     if (proposal.summary) {
       console.log(`  Resumo: ${shortText(proposal.summary, 180)}`);
     }
@@ -1011,55 +1870,86 @@ async function classifyProposals(params: {
       }], "proposal_id");
       updatedProposalIds.push(proposal.id);
       const elapsedMs = recordDuration(recentDurations, start);
+      await markRunItemDone(item, "classified", { durationMs: elapsedMs });
       console.log(`  ✓ Classificação: ${PUBLIC_VALUE_CATEGORIES[parsed.category].label} (${parsed.confidence})`);
       console.log(`  Justificativa: ${shortText(parsed.justification)}`);
       console.log(`  Tempo do item: ${formatEta(elapsedMs)}`);
     } catch (error) {
       const elapsedMs = recordDuration(recentDurations, start);
       failed += 1;
+      await markRunItemDone(item, "failed", { durationMs: elapsedMs, error });
       console.log(`  ✗ Falha: ${errorMessage(error).substring(0, 120)}`);
       console.log(`  Tempo do item: ${formatEta(elapsedMs)}`);
+      if (isHardQuotaError(error)) pausedError = error;
     }
+    const counts = await refreshRunCounts(params.runId);
+    console.log(`  Run: ${counts.classified_count} classificados | ${counts.failed_count} falhas | ${counts.pending_count} pendentes`);
     if (params.concurrency === 1 && index < toProcess.length - 1) await sleep(DEFAULT_DELAY_MS);
   });
 
+  if (pausedError) {
+    await updateRunStatus(params.runId, "paused", errorMessage(pausedError));
+    console.log(`\nExecução pausada por quota/limite: ${shortText(errorMessage(pausedError), 180)}`);
+    return { classified: updatedProposalIds.length, failed, skipped: 0, metricRows: 0 };
+  }
+
+  if (params.postProcessMode === "classify_only") {
+    console.log(`\nProposições: ${updatedProposalIds.length} classificadas; métricas não foram recalculadas nesta execução.`);
+    return { classified: updatedProposalIds.length, failed, skipped: 0, metricRows: 0 };
+  }
+
+  console.log(`\nProposições: ${updatedProposalIds.length} classificadas; recalculando métricas dos parlamentares afetados...`);
   const metricRows = await updateProposalMetrics(updatedProposalIds);
-  return { classified: updatedProposalIds.length, failed, skipped: toProcess.length - updatedProposalIds.length - failed, metricRows };
+  console.log(`Proposições: ${metricRows} linhas de métricas recalculadas.`);
+  return { classified: updatedProposalIds.length, failed, skipped: 0, metricRows };
 }
 
 async function classifyVotes(params: {
   level: AnalysisLevel;
-  scope: ClassifyScope;
-  limit: number;
-  provider: ReturnType<typeof getProvider>;
+  runId: string;
+  runMode: ClassificationRunMode;
+  provider: ModelSelection["provider"];
   model: string;
+  strongReview?: StrongReviewConfig;
   concurrency: number;
+  postProcessMode: PostProcessMode;
 }) {
-  const [votes, existing] = await Promise.all([
-    fetchAll<VoteRow>("votes", "id, vote_date, description, summary, url, session_number"),
-    fetchAll<{ vote_id: string; source: string | null; analysis_level: number | null }>(
-      "vote_classifications",
-      "vote_id, source, analysis_level",
-    ),
-  ]);
-  const existingMap = new Map(existing.map((row) => [row.vote_id, row]));
-  const candidates = votes.filter((vote) => shouldClassify(existingMap.get(vote.id), params.level, params.scope));
-  const toProcess = candidates.slice(0, params.limit);
+  const statuses: ClassificationRunItemStatus[] = params.runMode === "retry_failed"
+    ? ["failed"]
+    : ["pending", "processing", "failed"];
+  const runItems = await fetchRunItems(params.runId, "votes", statuses);
+  const votes = await fetchByIds<VoteRow>(
+    "votes",
+    runItems.map((item) => item.item_id),
+    "id, vote_date, description, summary, url, session_number",
+  );
+  const voteMap = new Map(votes.map((vote) => [vote.id, vote]));
+  const toProcess = runItems.map((item) => ({ item, vote: voteMap.get(item.item_id) }));
   const analyses = new Map<string, PublicVoteAnalysis>();
   const recentDurations: number[] = [];
   const runStartedAt = Date.now();
   let failed = 0;
+  let pausedError: unknown = null;
 
-  console.log(`\nVotações elegíveis: ${candidates.length}; processando ${toProcess.length}`);
-  await runWithConcurrency(toProcess, params.concurrency, async (vote, index) => {
+  console.log(`\nVotações no run: ${runItems.length}; processando ${toProcess.length}`);
+  await runWithConcurrency(toProcess, params.concurrency, async (task, index) => {
+    if (pausedError) return;
+    const { item, vote } = task;
     const start = performance.now();
     progressLine({
       index,
       total: toProcess.length,
       runStartedAt,
       recentDurations,
-      label: vote.id,
+      label: vote?.id ?? item.item_id,
     });
+    await markRunItemProcessing(item);
+    if (!vote) {
+      const elapsedMs = recordDuration(recentDurations, start);
+      await markRunItemDone(item, "skipped", { durationMs: elapsedMs, error: new Error("Votação não encontrada no banco") });
+      console.log("  ⚠ Votação não encontrada; item pulado.");
+      return;
+    }
     if (vote.description) {
       console.log(`  Descrição: ${shortText(vote.description, 180)}`);
     }
@@ -1074,13 +1964,30 @@ async function classifyVotes(params: {
           console.log("  ⚠ Sem inteiro teor; análise N3 será limitada e conservadora");
         }
       }
-      const parsed = await generateJsonResult({
+      let parsed = await generateJsonResult({
         provider: params.provider,
         model: params.model,
         prompt: votePrompt(vote, params.level, fullText),
         parse: parseVoteResult,
         label: vote.id,
       });
+      if (params.level === 3) {
+        parsed = finalizeVoteResult(parsed, vote, params.model, fullText, { modelRole: "triage" });
+        if (parsed.needsStrongReview && params.strongReview?.enabled && params.strongReview.provider && params.strongReview.model) {
+          console.log(`  Revisão forte: ${params.strongReview.provider.name} / ${params.strongReview.model}`);
+          const strongParsed = await generateJsonResult<VoteLlmResult>({
+            provider: params.strongReview.provider,
+            model: params.strongReview.model,
+            prompt: strongVotePrompt(vote, fullText, parsed),
+            parse: parseVoteResult,
+            label: "votação N3 revisão forte",
+          });
+          parsed = finalizeVoteResult(strongParsed, vote, params.strongReview.model, fullText, {
+            modelRole: "strong_review",
+            previousAnalysis: parsed,
+          });
+        }
+      }
       const fallbackType = inferLegislativeType(`${vote.description ?? ""} ${vote.summary ?? ""}`);
       const fallbackObjectType = inferVoteObjectType(vote.description);
       const analysis: PublicVoteAnalysis = {
@@ -1094,11 +2001,27 @@ async function classifyVotes(params: {
         decisionNature: parsed.decisionNature,
         decisionScope: parsed.decisionScope,
         voteObjectType: parsed.voteObjectType ?? fallbackObjectType,
+        voteObjectSubtype: parsed.voteObjectSubtype,
         voteObjectDescription: parsed.voteObjectDescription,
         yesMeans: parsed.yesMeans,
         noMeans: parsed.noMeans,
+        voteObjectTextFound: parsed.voteObjectTextFound,
+        primaryTextUsed: parsed.primaryTextUsed,
+        usedRelatedBillAsMainEvidence: parsed.usedRelatedBillAsMainEvidence,
         analyzedTextMatchesVoteObject: parsed.analyzedTextMatchesVoteObject,
         scoreImpactLimit: parsed.scoreImpactLimit,
+        recommendedScoreImpact: parsed.recommendedScoreImpact,
+        scoreSafetyReason: parsed.scoreSafetyReason,
+        modelRecommendation: parsed.modelRecommendation,
+        modelUsed: parsed.modelUsed,
+        modelRole: parsed.modelRole,
+        riskLevel: parsed.riskLevel,
+        analysisStatus: parsed.analysisStatus,
+        affectsScore: parsed.affectsScore,
+        scorePoints: parsed.scorePoints,
+        needsStrongReview: parsed.needsStrongReview,
+        reviewReason: parsed.reviewReason,
+        coverageCategory: parsed.coverageCategory,
         declaredBenefit: parsed.declaredBenefit,
         hiddenCost: parsed.hiddenCost,
         netPublicEffect: parsed.netPublicEffect,
@@ -1120,7 +2043,7 @@ async function classifyVotes(params: {
         session_number: vote.session_number ?? sessionNumberFromVoteId(vote.id),
         classification: normalized.classification,
         severity: normalized.severity,
-        public_interest_vote: normalized.publicInterestVote,
+        public_interest_vote: dbPublicInterestVote(normalized.publicInterestVote),
         confidence: normalized.confidence,
         reason: normalized.reason,
         source: "llm",
@@ -1132,24 +2055,55 @@ async function classifyVotes(params: {
       }], "vote_id,session_number");
       analyses.set(vote.id, normalized);
       const elapsedMs = recordDuration(recentDurations, start);
+      await markRunItemDone(item, "classified", { durationMs: elapsedMs });
       console.log(`  ✓ Classificação: ${parsed.classification} | Severidade: ${parsed.severity} | Voto público: ${parsed.publicInterestVote}`);
       console.log(`  Justificativa: ${shortText(parsed.reason)}`);
       console.log(`  Tempo do item: ${formatEta(elapsedMs)}`);
     } catch (error) {
       const elapsedMs = recordDuration(recentDurations, start);
       failed += 1;
+      await markRunItemDone(item, "failed", { durationMs: elapsedMs, error });
       console.log(`  ✗ Falha: ${errorMessage(error).substring(0, 120)}`);
       console.log(`  Tempo do item: ${formatEta(elapsedMs)}`);
+      if (isHardQuotaError(error)) pausedError = error;
     }
+    const counts = await refreshRunCounts(params.runId);
+    console.log(`  Run: ${counts.classified_count} classificados | ${counts.failed_count} falhas | ${counts.pending_count} pendentes`);
     if (params.concurrency === 1 && index < toProcess.length - 1) await sleep(DEFAULT_DELAY_MS);
   });
 
+  if (pausedError) {
+    await updateRunStatus(params.runId, "paused", errorMessage(pausedError));
+    console.log(`\nExecução pausada por quota/limite: ${shortText(errorMessage(pausedError), 180)}`);
+    return {
+      classified: analyses.size,
+      failed,
+      skipped: 0,
+      linksUpdated: 0,
+      metricRows: 0,
+    };
+  }
+
+  if (params.postProcessMode === "classify_only") {
+    console.log(`\nVotações: ${analyses.size} classificadas; scores/ranking não foram recalculados nesta execução.`);
+    return {
+      classified: analyses.size,
+      failed,
+      skipped: 0,
+      linksUpdated: 0,
+      metricRows: 0,
+    };
+  }
+
+  console.log(`\nVotações: ${analyses.size} classificadas; atualizando votos dos parlamentares vinculados...`);
   const affectedPairs = await updateLegislatorVotes(analyses);
+  console.log(`Votações: ${affectedPairs.size} pares parlamentar/período afetados; recalculando métricas...`);
   const metricRows = await updateVoteMetrics(affectedPairs);
+  console.log(`Votações: ${metricRows} linhas de métricas recalculadas.`);
   return {
     classified: analyses.size,
     failed,
-    skipped: toProcess.length - analyses.size - failed,
+    skipped: 0,
     linksUpdated: affectedPairs.size,
     metricRows,
   };
@@ -1171,7 +2125,7 @@ async function selectLevel(rl: Wizard, configMode: AnalysisMode) {
   const fallback = configMode === "advanced" ? "3" : "2";
   console.log("\nNível de análise:");
   console.log("  2) IA com resumo/descrição");
-  console.log("  3) Auditoria N3 · efeito líquido + objeto votado");
+  console.log("  3) Auditoria N3 segura · mini-first + pendência sem score");
   const answer = await question(rl, `Escolha [${fallback}]: `);
   return (answer || fallback) === "3" ? 3 : 2;
 }
@@ -1197,22 +2151,115 @@ async function selectConcurrency(rl: Wizard) {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_CONCURRENCY;
 }
 
+async function selectPostProcessMode(rl: Wizard, target: ClassifyTarget, limit: number): Promise<PostProcessMode> {
+  const fallback = target === "proposals" ? "2" : limit > 100 ? "1" : "2";
+  console.log("\nPós-processamento de scores:");
+  console.log("  1) Só classificar — grava análises, sem recalcular ranking agora");
+  console.log("  2) Classificar e recalcular afetados — atualiza score/ranking ao final");
+  console.log("  3) Só materializar votações — não chama IA, recalcula scores com análises já gravadas");
+  const answer = await question(rl, `Escolha [${fallback}]: `);
+  const value = answer || fallback;
+  if (value === "3") return "materialize_only";
+  if (value === "1") return "classify_only";
+  return "classify_and_recalculate";
+}
+
+async function selectStrongReview(config: Awaited<ReturnType<typeof loadConfig>>): Promise<StrongReviewConfig> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  console.log("\nRevisão avançada do N3:");
+  console.log("  1) Desativada — casos inseguros ficam pendentes/null");
+  console.log("  2) Ativada — chamar outro modelo só quando a triagem leve pedir revisão");
+  const answer = await question(rl, "Escolha [1]: ");
+  rl.close();
+  if (answer !== "2") return { enabled: false };
+  const selection = await interactiveSelect(config, "revisão forte N3");
+  return { enabled: true, provider: selection.provider, model: selection.model };
+}
+
+function postProcessModeLabel(mode: PostProcessMode) {
+  if (mode === "classify_only") return "Só classificar, sem recalcular ranking agora";
+  if (mode === "materialize_only") return "Só materializar votações já classificadas";
+  return "Classificar e recalcular afetados";
+}
+
+function isProviderId(value: string | null | undefined): value is ProviderId {
+  return value === "gemini" || value === "openai" || value === "ollama" || value === "lmstudio";
+}
+
+async function ensureProviderCredentials(selections: Array<ModelSelection | undefined | null>) {
+  const providers = new Map<ProviderId, string>();
+  for (const selection of selections) {
+    if (!selection) continue;
+    providers.set(selection.provider.id, selection.provider.name);
+  }
+  if (providers.size === 0) return;
+
+  const needsOpenAi = providers.has("openai") && !process.env.OPENAI_API_KEY;
+  const needsGemini = providers.has("gemini") && !process.env.GEMINI_API_KEY;
+  if (!needsOpenAi && !needsGemini) return;
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  if (needsOpenAi) {
+    const key = (await rl.question("OPENAI_API_KEY (usada só nesta sessão): ")).trim();
+    if (key) process.env.OPENAI_API_KEY = key;
+  }
+  if (needsGemini) {
+    const key = (await rl.question("GEMINI_API_KEY (usada só nesta sessão): ")).trim();
+    if (key) process.env.GEMINI_API_KEY = key;
+  }
+  rl.close();
+}
+
+async function selectRunMode(rl: Wizard, latestRun: ClassificationRunRow | null): Promise<ClassificationRunMode> {
+  console.log("\nExecução do lote:");
+  console.log(`  Última incompleta: ${runSummary(latestRun)}`);
+  console.log("  1) Nova execução");
+  console.log("  2) Continuar última execução incompleta");
+  console.log("  3) Reprocessar somente falhas da última execução");
+  const fallback = latestRun ? "2" : "1";
+  const answer = await question(rl, `Escolha [${fallback}]: `);
+  const value = answer || fallback;
+  if (value === "2" && latestRun) return "resume";
+  if (value === "3" && latestRun) return "retry_failed";
+  return "new";
+}
+
 async function confirmRun(rl: Wizard, params: {
   target: ClassifyTarget;
   level: AnalysisLevel;
   scope: ClassifyScope;
   limit: number;
   concurrency: number;
-  providerName: string;
-  model: string;
+  postProcessMode: PostProcessMode;
+  runMode: ClassificationRunMode;
+  runId?: string;
+  providerName?: string;
+  model?: string;
+  strongReview?: StrongReviewConfig;
 }) {
   console.log("\nResumo da execução:");
-  console.log(`  Alvo: ${params.target === "votes" ? "Votações" : params.target === "proposals" ? "Proposições" : "Ambos"}`);
+  console.log(`  Execução: ${params.runMode === "new" ? "Nova" : params.runMode === "resume" ? "Continuar última" : "Reprocessar falhas"}${params.runId ? ` (${params.runId.slice(0, 8)})` : ""}`);
+  const targetLabel = params.postProcessMode === "materialize_only"
+    ? "Votações (materialização)"
+    : params.target === "votes" ? "Votações" : params.target === "proposals" ? "Proposições" : "Ambos";
+  console.log(`  Alvo: ${targetLabel}`);
   console.log(`  Nível: ${params.level}`);
   console.log(`  Escopo: ${params.scope === "overwrite" ? "Sobrescrever mesmo nível/inferior" : "Pendentes/melhoráveis"}`);
   console.log(`  Limite por alvo: ${params.limit}`);
   console.log(`  Processos simultâneos: ${params.concurrency}`);
-  console.log(`  Provedor/modelo: ${params.providerName} / ${params.model}`);
+  console.log(`  Pós-processamento: ${postProcessModeLabel(params.postProcessMode)}`);
+  if (params.providerName && params.model) {
+    console.log(`  Provedor/modelo leve: ${params.providerName} / ${params.model}`);
+    if (params.level === 3) {
+      if (params.strongReview?.enabled && params.strongReview.provider && params.strongReview.model) {
+        console.log(`  Provedor/modelo pesado: ${params.strongReview.provider.name} / ${params.strongReview.model}`);
+      } else {
+        console.log("  Modelo pesado: desativado; casos inseguros ficam pendentes para revisão");
+      }
+    }
+  } else {
+    console.log("  Provedor/modelo: não usado");
+  }
   if (params.providerName === "OpenAI" && params.concurrency > 3) {
     console.log("  ⚠ OpenAI com mais de 3 processos simultâneos aumenta bastante o risco de 429. Recomendado: 2 ou 3.");
   }
@@ -1222,17 +2269,69 @@ async function confirmRun(rl: Wizard, params: {
 
 async function main() {
   const config = await loadConfig();
+  await assertClassificationRunSchema();
   const firstRl = createInterface({ input: process.stdin, output: process.stdout });
-  const target = await selectTarget(firstRl, config.lastTarget);
-  const level = await selectLevel(firstRl, config.lastMode);
-  if (level === 3) await assertLegislativeImpactSchema();
-  const counts = await getEligibilityCounts(level);
-  const scope = await selectScope(firstRl, counts, target);
-  const limit = await selectLimit(firstRl);
-  const concurrency = await selectConcurrency(firstRl);
+  const latestRun = await latestClassificationRun();
+  const runMode = await selectRunMode(firstRl, latestRun);
+
+  let run: ClassificationRunRow | null = runMode === "new" ? null : latestRun;
+  let target: ClassifyTarget;
+  let level: AnalysisLevel;
+  let scope: ClassifyScope;
+  let limit: number;
+  let concurrency: number;
+  let postProcessMode: PostProcessMode;
+
+  if (run) {
+    target = run.target;
+    level = run.analysis_level;
+    scope = run.scope;
+    limit = run.limit_per_target;
+    concurrency = run.concurrency;
+    postProcessMode = run.post_process_mode;
+  } else {
+    target = await selectTarget(firstRl, config.lastTarget);
+    level = await selectLevel(firstRl, config.lastMode);
+    if (level === 3) await assertLegislativeImpactSchema();
+    const counts = await getEligibilityCounts(level);
+    scope = await selectScope(firstRl, counts, target);
+    limit = await selectLimit(firstRl);
+    concurrency = await selectConcurrency(firstRl);
+    postProcessMode = await selectPostProcessMode(firstRl, target, limit);
+  }
   firstRl.close();
 
-  const selection = await interactiveSelect(config, "classificar");
+  if (level === 3) await assertLegislativeImpactSchema();
+
+  let selection: ModelSelection | null = null;
+  let strongReview: StrongReviewConfig = { enabled: false };
+
+  if (postProcessMode !== "materialize_only") {
+    if (run) {
+      if (!isProviderId(run.provider) || !run.model) {
+        throw new Error(`Run ${run.id} não tem provider/modelo válidos para retomada.`);
+      }
+      selection = {
+        provider: getProvider(run.provider, config.providers[run.provider]),
+        model: run.model,
+      };
+      if (level === 3 && run.strong_review_enabled) {
+        if (!isProviderId(run.strong_provider) || !run.strong_model) {
+          throw new Error(`Run ${run.id} tem revisão forte ligada, mas não tem provider/modelo forte válidos.`);
+        }
+        strongReview = {
+          enabled: true,
+          provider: getProvider(run.strong_provider, config.providers[run.strong_provider]),
+          model: run.strong_model,
+        };
+      }
+    } else {
+      selection = await interactiveSelect(config, level === 3 ? "triagem leve N3" : "classificar");
+      if (level === 3) strongReview = await selectStrongReview(config);
+    }
+  }
+
+  await ensureProviderCredentials([selection, strongReview.enabled ? { provider: strongReview.provider!, model: strongReview.model! } : null]);
 
   const confirmRl = createInterface({ input: process.stdin, output: process.stdout });
   const canRun = await confirmRun(confirmRl, {
@@ -1241,8 +2340,12 @@ async function main() {
     scope,
     limit,
     concurrency,
-    providerName: selection.provider.name,
-    model: selection.model,
+    postProcessMode,
+    runMode,
+    runId: run?.id,
+    providerName: selection?.provider.name,
+    model: selection?.model,
+    strongReview,
   });
   confirmRl.close();
   if (!canRun) {
@@ -1250,31 +2353,74 @@ async function main() {
     return;
   }
 
-  config.lastProvider = selection.provider.id;
-  config.lastModel = selection.model;
-  config.lastMode = level === 3 ? "advanced" : "basic";
-  config.lastTarget = target === "both" ? "votes" : target;
-  await saveConfig(config);
+  if (!run) {
+    run = await createClassificationRun({
+      target,
+      level,
+      scope,
+      limit,
+      concurrency,
+      postProcessMode,
+      provider: selection?.provider.id,
+      model: selection?.model,
+      strongReview: {
+        enabled: strongReview.enabled,
+        provider: strongReview.provider?.id,
+        model: strongReview.model,
+      },
+    });
+    if (postProcessMode !== "materialize_only") {
+      const prepared = await prepareRunItemsForNewRun({ runId: run.id, target, level, scope, limit });
+      console.log(`Run ${run.id.slice(0, 8)} preparado com ${prepared} itens.`);
+    }
+  }
 
+  if (selection && runMode === "new") {
+    config.lastProvider = selection.provider.id;
+    config.lastModel = selection.model;
+    config.lastMode = level === 3 ? "advanced" : "basic";
+    config.lastTarget = target === "both" ? "votes" : target;
+    await saveConfig(config);
+  }
+
+  await updateRunStatus(run.id, "running");
   const started = Date.now();
   const stats: RunStats = {
     proposals: { classified: 0, failed: 0, skipped: 0, metricRows: 0 },
     votes: { classified: 0, failed: 0, skipped: 0, metricRows: 0, linksUpdated: 0 },
   };
-  const runParams = { level, scope, limit, concurrency, provider: selection.provider, model: selection.model };
+  if (postProcessMode === "materialize_only") {
+    stats.votes = await materializeVoteScores(limit);
+  } else if (selection) {
+    const runParams = {
+      level,
+      concurrency,
+      provider: selection.provider,
+      model: selection.model,
+      strongReview,
+      postProcessMode,
+      runId: run.id,
+      runMode,
+    };
 
-  if (target === "votes" || target === "both") {
-    stats.votes = await classifyVotes(runParams);
+    if (target === "votes" || target === "both") {
+      stats.votes = await classifyVotes(runParams);
+    }
+    const runAfterVotes = await readClassificationRun(run.id);
+    if (runAfterVotes.status !== "paused" && (target === "proposals" || target === "both")) {
+      stats.proposals = await classifyProposals(runParams);
+    }
   }
-  if (target === "proposals" || target === "both") {
-    stats.proposals = await classifyProposals(runParams);
-  }
+  const finalRun = await finishRunIfNotPaused(run.id);
 
   const elapsedMs = Date.now() - started;
   console.log("\n====================================");
-  console.log("Classificação LLM gravada diretamente no Supabase");
-  console.log(`Nível gravado: ${level}`);
+  console.log(postProcessMode === "materialize_only"
+    ? "Materialização de scores concluída no Supabase"
+    : "Classificação LLM gravada diretamente no Supabase");
+  console.log(`${postProcessMode === "materialize_only" ? "Nível selecionado" : "Nível gravado"}: ${level}`);
   console.log(`Tempo total: ${formatEta(elapsedMs)} (${formatCompletionDate(0)})`);
+  console.log(`Run: ${finalRun.id.slice(0, 8)} · status ${finalRun.status} · ${finalRun.classified_count}/${finalRun.total_items} classificados · ${finalRun.failed_count} falhas · ${finalRun.pending_count} pendentes`);
   console.log(`Votações: ${stats.votes.classified} classificadas, ${stats.votes.failed} falhas, ${stats.votes.skipped} puladas, ${stats.votes.metricRows} métricas recalculadas`);
   console.log(`Proposições: ${stats.proposals.classified} classificadas, ${stats.proposals.failed} falhas, ${stats.proposals.skipped} puladas, ${stats.proposals.metricRows} métricas recalculadas`);
 }

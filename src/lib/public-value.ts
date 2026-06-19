@@ -100,7 +100,7 @@ export type PublicVoteClassification =
   | "harmful_or_self_serving";
 export type PublicVoteSeverity = "low" | "medium" | "high" | "critical";
 export type CandidateVote = "yes" | "no" | "abstain" | "absent";
-export type PublicInterestVote = "yes" | "no" | "any" | "none";
+export type PublicInterestVote = "yes" | "no" | "any" | "none" | "indeterminate";
 export type LegislativeType =
   | "PL"
   | "PLP"
@@ -125,11 +125,14 @@ export type VoteObjectType =
   | "amendment"
   | "substitute"
   | "highlight"
+  | "separate_vote"
   | "urgency"
   | "procedural_request"
   | "postponement"
   | "agenda_withdrawal"
   | "appeal"
+  | "symbolic"
+  | "fiscalization"
   | "other"
   | "unclear";
 export type DecisionNature =
@@ -157,9 +160,24 @@ export type DecisionScope =
   | "symbolic_only"
   | "local_or_specific"
   | "unclear";
-export type NetPublicEffect = "positive" | "negative" | "mixed" | "unclear";
+export type NetPublicEffect = "positive" | "negative" | "mixed" | "neutral" | "unclear" | "insufficient";
 export type SummaryMatchesText = "true" | "false" | "unclear";
 export type ScoreImpactLimit = "none" | "low" | "medium" | "high" | "critical";
+export type VoteObjectSubtype = "amendment" | "substitute" | "main_bill" | "request" | "none" | "unclear";
+export type PrimaryTextUsed = "vote_object" | "related_bill" | "summary_only" | "unknown";
+export type ModelRecommendation = "strong_model_required" | "mini_allowed_for_triage";
+export type ModelRole = "triage" | "strong_review" | "rules_only";
+export type RiskLevel = "low" | "medium" | "high" | "critical";
+export type AnalysisStatus =
+  | "validated"
+  | "neutral_validated"
+  | "pending_strong_review"
+  | "insufficient_data"
+  | "mixed_requires_review"
+  | "procedural_low_confidence"
+  | "not_eligible"
+  | "failed_parsing";
+export type CoverageCategory = "scored" | "neutral_analyzed" | "pending_review" | "insufficient" | "not_eligible";
 export type RiskFlag =
   | "benefit_offset_by_hidden_cost"
   | "hidden_revocation"
@@ -180,11 +198,15 @@ export type RiskFlag =
   | "procedural_only"
   | "vote_object_unclear"
   | "text_does_not_match_vote_object"
+  | "insufficient_vote_object_text"
+  | "hidden_exception"
+  | "sector_specific_benefit"
   | "insufficient_text"
   | "none";
 export type CriticalArticle = {
   article: string;
   issue: string;
+  appearsInVoteObjectText?: boolean;
 };
 
 export type ProposalClassification = {
@@ -210,6 +232,18 @@ export type ProposalClassification = {
 
 export const METHODOLOGY_VERSION = "legislative-impact-v2";
 export const METHODOLOGY_REVIEWED_AT = "2026-06-19";
+export const LEGISLATIVE_IMPACT_V3_VERSION = "legislative-impact-v3-strong-model";
+export const LEGISLATIVE_IMPACT_V4_VERSION = "legislative-impact-v4-mini-first-safe-score";
+export const MINI_SAFE_SCORE_CONFIG = {
+  useStrongModelReview: false,
+  allowMiniHighRiskScoring: false,
+  minConfidenceToScoreWithMini: 0.85,
+  minConfidenceToApplyAnyScore: 0.7,
+  maxMiniScoreImpact: 12,
+  maxMiniSpecificObjectImpact: 8,
+  maxMiniProceduralImpact: 2,
+  maxMiniMixedImpact: 0,
+} as const;
 
 export type PublicVoteAnalysis = {
   voteId: string;
@@ -222,11 +256,27 @@ export type PublicVoteAnalysis = {
   decisionNature?: DecisionNature;
   decisionScope?: DecisionScope;
   voteObjectType?: VoteObjectType;
+  voteObjectSubtype?: VoteObjectSubtype;
   voteObjectDescription?: string;
   yesMeans?: string;
   noMeans?: string;
+  voteObjectTextFound?: boolean;
+  primaryTextUsed?: PrimaryTextUsed;
+  usedRelatedBillAsMainEvidence?: boolean;
   analyzedTextMatchesVoteObject?: SummaryMatchesText;
   scoreImpactLimit?: ScoreImpactLimit;
+  recommendedScoreImpact?: number;
+  scoreSafetyReason?: string;
+  modelRecommendation?: ModelRecommendation;
+  modelUsed?: string;
+  modelRole?: ModelRole;
+  riskLevel?: RiskLevel;
+  analysisStatus?: AnalysisStatus;
+  affectsScore?: boolean;
+  scorePoints?: number | null;
+  needsStrongReview?: boolean;
+  reviewReason?: string;
+  coverageCategory?: CoverageCategory;
   declaredBenefit?: string;
   hiddenCost?: string;
   netPublicEffect?: NetPublicEffect;
@@ -250,13 +300,22 @@ export type PublicVoteRecord = {
   classification: PublicVoteClassification;
   severity: PublicVoteSeverity;
   scoreDelta: number;
+  scorePoints?: number | null;
+  affectsScore?: boolean;
+  analysisStatus?: AnalysisStatus;
+  needsStrongReview?: boolean;
+  reviewReason?: string;
+  coverageCategory?: CoverageCategory;
+  scoreSafetyReason?: string;
+  modelUsed?: string;
+  modelRole?: ModelRole;
   confidence: number;
   reason: string;
   source: string;
   reviewedManually: boolean;
 };
 
-export const VOTE_METHODOLOGY_VERSION = "legislative-impact-v2";
+export const VOTE_METHODOLOGY_VERSION = LEGISLATIVE_IMPACT_V4_VERSION;
 
 const PUBLIC_VOTE_CLASSIFICATIONS = [
   "positive_public_interest",
@@ -266,7 +325,7 @@ const PUBLIC_VOTE_CLASSIFICATIONS = [
   "harmful_or_self_serving",
 ] as const satisfies readonly PublicVoteClassification[];
 const PUBLIC_VOTE_SEVERITIES = ["low", "medium", "high", "critical"] as const satisfies readonly PublicVoteSeverity[];
-const PUBLIC_INTEREST_VOTES = ["yes", "no", "any", "none"] as const satisfies readonly PublicInterestVote[];
+const PUBLIC_INTEREST_VOTES = ["yes", "no", "any", "none", "indeterminate"] as const satisfies readonly PublicInterestVote[];
 const LEGISLATIVE_TYPES = [
   "PL",
   "PLP",
@@ -292,11 +351,14 @@ const VOTE_OBJECT_TYPES = [
   "amendment",
   "substitute",
   "highlight",
+  "separate_vote",
   "urgency",
   "procedural_request",
   "postponement",
   "agenda_withdrawal",
   "appeal",
+  "symbolic",
+  "fiscalization",
   "other",
   "unclear",
 ] as const satisfies readonly VoteObjectType[];
@@ -327,9 +389,25 @@ const DECISION_SCOPES = [
   "local_or_specific",
   "unclear",
 ] as const satisfies readonly DecisionScope[];
-const NET_PUBLIC_EFFECTS = ["positive", "negative", "mixed", "unclear"] as const satisfies readonly NetPublicEffect[];
+const NET_PUBLIC_EFFECTS = ["positive", "negative", "mixed", "neutral", "unclear", "insufficient"] as const satisfies readonly NetPublicEffect[];
 const SUMMARY_MATCHES_TEXT = ["true", "false", "unclear"] as const satisfies readonly SummaryMatchesText[];
 const SCORE_IMPACT_LIMITS = ["none", "low", "medium", "high", "critical"] as const satisfies readonly ScoreImpactLimit[];
+const VOTE_OBJECT_SUBTYPES = ["amendment", "substitute", "main_bill", "request", "none", "unclear"] as const satisfies readonly VoteObjectSubtype[];
+const PRIMARY_TEXT_USED = ["vote_object", "related_bill", "summary_only", "unknown"] as const satisfies readonly PrimaryTextUsed[];
+const MODEL_RECOMMENDATIONS = ["strong_model_required", "mini_allowed_for_triage"] as const satisfies readonly ModelRecommendation[];
+const MODEL_ROLES = ["triage", "strong_review", "rules_only"] as const satisfies readonly ModelRole[];
+const RISK_LEVELS = ["low", "medium", "high", "critical"] as const satisfies readonly RiskLevel[];
+const ANALYSIS_STATUSES = [
+  "validated",
+  "neutral_validated",
+  "pending_strong_review",
+  "insufficient_data",
+  "mixed_requires_review",
+  "procedural_low_confidence",
+  "not_eligible",
+  "failed_parsing",
+] as const satisfies readonly AnalysisStatus[];
+const COVERAGE_CATEGORIES = ["scored", "neutral_analyzed", "pending_review", "insufficient", "not_eligible"] as const satisfies readonly CoverageCategory[];
 const RISK_FLAGS = [
   "benefit_offset_by_hidden_cost",
   "hidden_revocation",
@@ -350,6 +428,9 @@ const RISK_FLAGS = [
   "procedural_only",
   "vote_object_unclear",
   "text_does_not_match_vote_object",
+  "insufficient_vote_object_text",
+  "hidden_exception",
+  "sector_specific_benefit",
   "insufficient_text",
   "none",
 ] as const satisfies readonly RiskFlag[];
@@ -470,6 +551,11 @@ function booleanValue(value: unknown, fallback = false) {
   return typeof value === "boolean" ? value : fallback;
 }
 
+function numberValue(value: unknown, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
 function normalizeRiskFlags(value: unknown): RiskFlag[] {
   if (!Array.isArray(value)) return ["none"];
   const flags = value.filter((flag): flag is RiskFlag =>
@@ -486,7 +572,13 @@ function normalizeCriticalArticles(value: unknown): CriticalArticle[] {
     const article = textValue(record.article).trim();
     const issue = textValue(record.issue).trim();
     if (!article || !issue) return [];
-    return [{ article, issue }];
+    return [{
+      article,
+      issue,
+      appearsInVoteObjectText: typeof record.appearsInVoteObjectText === "boolean"
+        ? record.appearsInVoteObjectText
+        : undefined,
+    }];
   });
 }
 
@@ -514,16 +606,29 @@ export function inferLegislativeType(value: string | null | undefined): Legislat
 export function inferVoteObjectType(description: string | null | undefined): VoteObjectType {
   const text = normalizeProposalText(description || "");
   if (!text) return "unclear";
+  if (/\burgencia\b|regime de urgencia/.test(text)) return "urgency";
+  if (/\bretirada de pauta\b|retirar de pauta/.test(text)) return "agenda_withdrawal";
+  if (/\bdestaque\b|\bdtq\b/.test(text)) return "highlight";
+  if (/\bvotacao em separado\b|\bvts\b/.test(text)) return "separate_vote";
   if (/\bemenda\b|\bemp\b/.test(text)) return "amendment";
   if (/\bsubstitutivo\b|\bsbt\b/.test(text)) return "substitute";
-  if (/\bdestaque\b|\bdtq\b/.test(text)) return "highlight";
-  if (/\burgencia\b|regime de urgencia/.test(text)) return "urgency";
   if (/\badiamento\b|adiar\b/.test(text)) return "postponement";
-  if (/\bretirada de pauta\b|retirar de pauta/.test(text)) return "agenda_withdrawal";
   if (/\brecurso\b/.test(text)) return "appeal";
   if (/\brequerimento\b|\breq\b/.test(text)) return "procedural_request";
+  if (/\binformacao\b|\bconvocacao\b|\baudiencia publica\b|\bfiscalizacao\b/.test(text)) return "fiscalization";
+  if (/\bmocao\b|\bhomenagem\b|\bsessao solene\b|\baplausos\b|\brepudio\b/.test(text)) return "symbolic";
   if (/\baprovacao\b|\bapreciacao\b|\bvotacao nominal\b|\bmerito\b|\bprojeto\b/.test(text)) return "main_bill";
   return "unclear";
+}
+
+export function inferVoteObjectSubtype(description: string | null | undefined): VoteObjectSubtype {
+  const text = normalizeProposalText(description || "");
+  if (!text) return "unclear";
+  if (/\bemenda\b|\bemp\b/.test(text)) return "amendment";
+  if (/\bsubstitutivo\b|\bsbt\b/.test(text)) return "substitute";
+  if (/\brequerimento\b|\breq\b/.test(text)) return "request";
+  if (/\bprojeto\b|\bpl\b|\bpec\b|\bplp\b/.test(text)) return "main_bill";
+  return "none";
 }
 
 export function normalizeProposalAnalysis(raw: ProposalClassification): ProposalClassification {
@@ -559,11 +664,27 @@ export function normalizeVoteAnalysis(raw: PublicVoteAnalysis): PublicVoteAnalys
     decisionNature: enumValue(raw.decisionNature, DECISION_NATURES, "unclear"),
     decisionScope: enumValue(raw.decisionScope, DECISION_SCOPES, "unclear"),
     voteObjectType: enumValue(raw.voteObjectType, VOTE_OBJECT_TYPES, "unclear"),
+    voteObjectSubtype: enumValue(raw.voteObjectSubtype, VOTE_OBJECT_SUBTYPES, "unclear"),
     voteObjectDescription: textValue(raw.voteObjectDescription),
     yesMeans: textValue(raw.yesMeans),
     noMeans: textValue(raw.noMeans),
+    voteObjectTextFound: booleanValue(raw.voteObjectTextFound),
+    primaryTextUsed: enumValue(raw.primaryTextUsed, PRIMARY_TEXT_USED, "unknown"),
+    usedRelatedBillAsMainEvidence: booleanValue(raw.usedRelatedBillAsMainEvidence),
     analyzedTextMatchesVoteObject: enumValue(raw.analyzedTextMatchesVoteObject, SUMMARY_MATCHES_TEXT, "unclear"),
     scoreImpactLimit: enumValue(raw.scoreImpactLimit, SCORE_IMPACT_LIMITS, "low"),
+    recommendedScoreImpact: numberValue(raw.recommendedScoreImpact),
+    scoreSafetyReason: textValue(raw.scoreSafetyReason),
+    modelRecommendation: enumValue(raw.modelRecommendation, MODEL_RECOMMENDATIONS, "mini_allowed_for_triage"),
+    modelUsed: textValue(raw.modelUsed),
+    modelRole: enumValue(raw.modelRole, MODEL_ROLES, "triage"),
+    riskLevel: enumValue(raw.riskLevel, RISK_LEVELS, "low"),
+    analysisStatus: enumValue(raw.analysisStatus, ANALYSIS_STATUSES, "validated"),
+    affectsScore: booleanValue(raw.affectsScore, true),
+    scorePoints: raw.scorePoints === null ? null : numberValue(raw.scorePoints),
+    needsStrongReview: booleanValue(raw.needsStrongReview),
+    reviewReason: textValue(raw.reviewReason),
+    coverageCategory: enumValue(raw.coverageCategory, COVERAGE_CATEGORIES, "scored"),
     declaredBenefit: textValue(raw.declaredBenefit),
     hiddenCost: textValue(raw.hiddenCost),
     netPublicEffect: enumValue(raw.netPublicEffect, NET_PUBLIC_EFFECTS, "unclear"),
@@ -572,7 +693,7 @@ export function normalizeVoteAnalysis(raw: PublicVoteAnalysis): PublicVoteAnalys
     riskFlags: normalizeRiskFlags(raw.riskFlags),
     criticalArticles: normalizeCriticalArticles(raw.criticalArticles),
     reason: textValue(raw.reason, "Análise limitada por falta de dados suficientes."),
-    analysisMethodVersion: textValue(raw.analysisMethodVersion, METHODOLOGY_VERSION),
+    analysisMethodVersion: textValue(raw.analysisMethodVersion, VOTE_METHODOLOGY_VERSION),
     analysisPayload: payload,
   };
 }
@@ -753,10 +874,28 @@ export function publicVoteScoreDelta(
   analysis: PublicVoteAnalysis,
   candidateVote: CandidateVote,
 ) {
+  return publicVoteScoreDecision(analysis, candidateVote).scoreDelta;
+}
+
+export function publicVoteScoreDecision(
+  analysis: PublicVoteAnalysis,
+  candidateVote: CandidateVote,
+) {
   const normalized = normalizeVoteAnalysis(analysis);
-  if (shouldZeroVoteScore(normalized)) return 0;
-  if (candidateVote === "absent" || candidateVote === "abstain") return 0;
-  if (normalized.publicInterestVote !== "yes" && normalized.publicInterestVote !== "no") return 0;
+  if (shouldPendingVoteScore(normalized)) {
+    return pendingVoteDecision(normalized, choosePendingStatus(normalized), normalized.reviewReason || normalized.scoreSafetyReason || "Caso exige revisão avançada ou dados adicionais.");
+  }
+  if (candidateVote === "absent" || candidateVote === "abstain") {
+    return neutralVoteDecision(normalized, "Ausência ou abstenção não altera score.");
+  }
+  if (normalized.publicInterestVote === "none" || normalized.publicInterestVote === "any") {
+    if (normalized.classification === "neutral" || normalized.classification === "low_relevance") {
+      return neutralVoteDecision(normalized, normalized.scoreSafetyReason || "Analisado, sem direção segura para pontuar um voto específico.");
+    }
+  }
+  if (normalized.publicInterestVote !== "yes" && normalized.publicInterestVote !== "no") {
+    return pendingVoteDecision(normalized, "pending_strong_review", "Não há voto de interesse público claro.");
+  }
 
   const aligned = candidateVote === normalized.publicInterestVote;
   let delta = aligned ? basePointsFromSeverity(normalized.severity) : -basePointsFromSeverity(normalized.severity);
@@ -770,20 +909,127 @@ export function publicVoteScoreDelta(
   delta = applyScoreImpactLimit(delta, normalized.scoreImpactLimit ?? "low");
   delta = applyConfidenceLimit(delta, normalized.confidence);
   if (normalized.isProceduralVote && normalized.scoreImpactLimit === "low") {
-    delta = Math.sign(delta) * Math.min(Math.abs(delta), 3);
+    delta = Math.sign(delta) * Math.min(Math.abs(delta), MINI_SAFE_SCORE_CONFIG.maxMiniProceduralImpact);
   }
-  return delta;
+  delta = applyModelLimit(delta, normalized);
+  if (delta === 0) {
+    return neutralVoteDecision(normalized, normalized.scoreSafetyReason || "Pontuação final limitada a zero pelas regras de segurança.");
+  }
+  return {
+    scoreDelta: delta,
+    scorePoints: delta,
+    affectsScore: true,
+    analysisStatus: "validated" as AnalysisStatus,
+    needsStrongReview: false,
+    reviewReason: normalized.reviewReason || "Não precisa revisão avançada.",
+    coverageCategory: "scored" as CoverageCategory,
+    scoreSafetyReason: normalized.scoreSafetyReason || "Pontuação aplicada com segurança suficiente.",
+  };
 }
 
-function shouldZeroVoteScore(analysis: PublicVoteAnalysis) {
+function shouldPendingVoteScore(analysis: PublicVoteAnalysis) {
+  if (analysis.analysisStatus && analysis.analysisStatus !== "validated" && analysis.analysisStatus !== "neutral_validated") return true;
+  if (analysis.needsStrongReview) return true;
+  if (analysis.publicInterestVote === "indeterminate") return true;
+  if (analysis.analyzedTextMatchesVoteObject === "false") return true;
+  if (hasSpecificObjectScopeMismatch(analysis)) return true;
+  if (analysis.riskFlags?.includes("scope_mismatch") === true) return true;
+  if (analysis.riskFlags?.includes("vote_object_unclear") === true) return true;
+  if (analysis.riskFlags?.includes("text_does_not_match_vote_object") === true) return true;
+  if (analysis.riskFlags?.includes("insufficient_vote_object_text") === true && isMiniFirstSafetyAnalysis(analysis)) return true;
+  if (analysis.criticalArticles?.some((article) => article.appearsInVoteObjectText === false) === true) return true;
+  if (!isMiniFirstSafetyAnalysis(analysis)) return false;
   return (
     analysis.publicInterestVote === "none" ||
     analysis.publicInterestVote === "any" ||
     analysis.voteObjectType === "unclear" ||
-    analysis.analyzedTextMatchesVoteObject === "false" ||
-    analysis.riskFlags?.includes("vote_object_unclear") === true ||
-    analysis.riskFlags?.includes("text_does_not_match_vote_object") === true ||
-    analysis.confidence < 0.5
+    analysis.usedRelatedBillAsMainEvidence === true ||
+    analysis.riskLevel === "high" ||
+    analysis.riskLevel === "critical" ||
+    analysis.netPublicEffect === "mixed" ||
+    analysis.netPublicEffect === "unclear" ||
+    analysis.netPublicEffect === "insufficient" ||
+    analysis.confidence < MINI_SAFE_SCORE_CONFIG.minConfidenceToScoreWithMini
+  );
+}
+
+function choosePendingStatus(analysis: PublicVoteAnalysis): AnalysisStatus {
+  if (analysis.netPublicEffect === "mixed") return "mixed_requires_review";
+  if (analysis.netPublicEffect === "insufficient" || analysis.netPublicEffect === "unclear") return "insufficient_data";
+  if (isProceduralObject(analysis.voteObjectType) && analysis.confidence < MINI_SAFE_SCORE_CONFIG.minConfidenceToScoreWithMini) return "procedural_low_confidence";
+  return "pending_strong_review";
+}
+
+function pendingVoteDecision(analysis: PublicVoteAnalysis, status: AnalysisStatus, reason: string) {
+  return {
+    scoreDelta: 0,
+    scorePoints: null,
+    affectsScore: false,
+    analysisStatus: status,
+    needsStrongReview: status !== "not_eligible",
+    reviewReason: reason,
+    coverageCategory: status === "insufficient_data" ? "insufficient" as CoverageCategory : "pending_review" as CoverageCategory,
+    scoreSafetyReason: reason,
+  };
+}
+
+function neutralVoteDecision(analysis: PublicVoteAnalysis, reason: string) {
+  return {
+    scoreDelta: 0,
+    scorePoints: 0,
+    affectsScore: false,
+    analysisStatus: "neutral_validated" as AnalysisStatus,
+    needsStrongReview: false,
+    reviewReason: reason,
+    coverageCategory: "neutral_analyzed" as CoverageCategory,
+    scoreSafetyReason: reason || analysis.scoreSafetyReason || "Analisado, sem impacto no score.",
+  };
+}
+
+function hasSpecificObjectScopeMismatch(analysis: PublicVoteAnalysis) {
+  if (!isStrongN3Analysis(analysis) || !isSpecificVoteObject(analysis.voteObjectType)) return false;
+  return (
+    analysis.voteObjectTextFound !== true ||
+    analysis.primaryTextUsed !== "vote_object" ||
+    analysis.analyzedTextMatchesVoteObject !== "true"
+  );
+}
+
+function isStrongN3Analysis(analysis: PublicVoteAnalysis) {
+  return (
+    analysis.analysisLevel === 3 ||
+    analysis.analysisMethodVersion === LEGISLATIVE_IMPACT_V3_VERSION ||
+    analysis.analysisMethodVersion === LEGISLATIVE_IMPACT_V4_VERSION
+  );
+}
+
+function isMiniFirstSafetyAnalysis(analysis: PublicVoteAnalysis) {
+  if (analysis.modelRole === "strong_review") return false;
+  const model = normalizeProposalText(analysis.modelUsed || "");
+  return (
+    analysis.analysisMethodVersion === LEGISLATIVE_IMPACT_V4_VERSION ||
+    analysis.methodologyVersion === LEGISLATIVE_IMPACT_V4_VERSION ||
+    analysis.modelRole === "triage" ||
+    model.includes("mini")
+  );
+}
+
+function isSpecificVoteObject(type: VoteObjectType | undefined) {
+  return (
+    type === "amendment" ||
+    type === "highlight" ||
+    type === "substitute" ||
+    type === "separate_vote"
+  );
+}
+
+function isProceduralObject(type: VoteObjectType | undefined) {
+  return (
+    type === "urgency" ||
+    type === "procedural_request" ||
+    type === "postponement" ||
+    type === "agenda_withdrawal" ||
+    type === "appeal"
   );
 }
 
@@ -792,8 +1038,8 @@ function applyScoreImpactLimit(points: number, limit: ScoreImpactLimit) {
     none: 0,
     low: 3,
     medium: 8,
-    high: 15,
-    critical: 25,
+    high: 13,
+    critical: 21,
   };
   return Math.sign(points) * Math.min(Math.abs(points), maxByLimit[limit]);
 }
@@ -803,6 +1049,18 @@ function applyConfidenceLimit(points: number, confidence: number) {
   if (confidence < 0.65) return Math.sign(points) * Math.min(Math.abs(points), 3);
   if (confidence < 0.75) return Math.sign(points) * Math.min(Math.abs(points), 8);
   return points;
+}
+
+function applyModelLimit(points: number, analysis: PublicVoteAnalysis) {
+  const model = normalizeProposalText(analysis.modelUsed || "");
+  if (!model.includes("mini")) return points;
+  if (isProceduralObject(analysis.voteObjectType)) {
+    return Math.sign(points) * Math.min(Math.abs(points), MINI_SAFE_SCORE_CONFIG.maxMiniProceduralImpact);
+  }
+  if (isSpecificVoteObject(analysis.voteObjectType)) {
+    return Math.sign(points) * Math.min(Math.abs(points), MINI_SAFE_SCORE_CONFIG.maxMiniSpecificObjectImpact);
+  }
+  return Math.sign(points) * Math.min(Math.abs(points), MINI_SAFE_SCORE_CONFIG.maxMiniScoreImpact);
 }
 
 function basePointsFromSeverity(severity: PublicVoteSeverity) {
@@ -854,13 +1112,23 @@ export function buildPublicVoteRecord(
   candidateId: number | string,
   candidateVote: CandidateVote,
 ): PublicVoteRecord {
+  const decision = publicVoteScoreDecision(analysis, candidateVote);
   return {
     voteId: analysis.voteId,
     candidateId: String(candidateId),
     candidateVote,
     classification: analysis.classification,
     severity: analysis.severity,
-    scoreDelta: publicVoteScoreDelta(analysis, candidateVote),
+    scoreDelta: decision.scoreDelta,
+    scorePoints: decision.scorePoints,
+    affectsScore: decision.affectsScore,
+    analysisStatus: decision.analysisStatus,
+    needsStrongReview: decision.needsStrongReview,
+    reviewReason: decision.reviewReason,
+    coverageCategory: decision.coverageCategory,
+    scoreSafetyReason: decision.scoreSafetyReason,
+    modelUsed: analysis.modelUsed,
+    modelRole: analysis.modelRole,
     confidence: analysis.confidence,
     reason: analysis.reason,
     source: analysis.source,
@@ -897,7 +1165,13 @@ function publicVoteRule(
     source: "rule",
     analysisLevel: 1,
     reviewedManually: false,
-    methodologyVersion: VOTE_METHODOLOGY_VERSION,
+    methodologyVersion: METHODOLOGY_VERSION,
+    analysisMethodVersion: METHODOLOGY_VERSION,
+    modelRole: "rules_only",
+    analysisStatus: analysis.publicInterestVote === "none" ? "neutral_validated" : "validated",
+    affectsScore: analysis.publicInterestVote !== "none",
+    needsStrongReview: false,
+    coverageCategory: analysis.publicInterestVote === "none" ? "neutral_analyzed" : "scored",
   };
 }
 

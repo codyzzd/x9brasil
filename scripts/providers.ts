@@ -229,7 +229,6 @@ class OpenAICompatibleProvider implements LLMProvider {
             { role: "user", content: prompt },
           ]
         : [{ role: "user", content: prompt }],
-      temperature: options.temperature ?? 0.1,
     };
     if (jsonMode) {
       body.response_format = { type: "json_object" };

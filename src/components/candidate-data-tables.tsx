@@ -8,12 +8,14 @@ import {
   FileSearch,
   ListChecks,
   Sparkles,
+  XIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { buttonVariants } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetHeader,
   SheetTitle,
@@ -66,7 +68,9 @@ function netPublicEffectLabel(value: string) {
   if (value === "positive") return "positivo"
   if (value === "negative") return "negativo"
   if (value === "mixed") return "misto"
+  if (value === "neutral") return "neutro"
   if (value === "unclear") return "incerto"
+  if (value === "insufficient") return "insuficiente"
   return "-"
 }
 
@@ -97,6 +101,27 @@ function riskFlagLabel(value: string) {
     .replace("vote object unclear", "objeto do voto incerto")
     .replace("text does not match vote object", "texto não corresponde ao objeto")
     .replace("insufficient text", "texto insuficiente")
+    .replace("insufficient vote object text", "texto do objeto insuficiente")
+}
+
+function analysisStatusLabel(value: string) {
+  if (value === "validated") return "validado com score"
+  if (value === "neutral_validated") return "neutro validado"
+  if (value === "pending_strong_review") return "pendente de revisão forte"
+  if (value === "insufficient_data") return "dados insuficientes"
+  if (value === "mixed_requires_review") return "misto, exige revisão"
+  if (value === "procedural_low_confidence") return "procedimental com baixa confiança"
+  if (value === "not_eligible") return "fora do escopo"
+  if (value === "failed_parsing") return "falha de leitura"
+  return value || "-"
+}
+
+function riskLevelLabel(value: string) {
+  if (value === "critical") return "risco crítico"
+  if (value === "high") return "risco alto"
+  if (value === "medium") return "risco médio"
+  if (value === "low") return "risco baixo"
+  return value || "-"
 }
 
 function candidateVoteLabel(value: string) {
@@ -120,7 +145,7 @@ function analysisMethod(source: string, analysisLevel: 1 | 2 | 3 | null | undefi
   const level = inferredAnalysisLevel(source, analysisLevel)
   if (level === 1) return { label: "Nível 1 · regra automática", Icon: ListChecks }
   if (level === 2) return { label: "Nível 2 · IA com resumo", Icon: Sparkles }
-  if (level === 3) return { label: "Nível 3 · IA com inteiro teor", Icon: Brain }
+  if (level === 3) return { label: "Nível 3 · auditoria segura", Icon: Brain }
   return { label: "Não analisado", Icon: FileSearch }
 }
 
@@ -222,7 +247,7 @@ const VOTE_POSITIONING_SEGMENTS: {
 type ExpenseCategory = { name: string; total: number; documents: number }
 type Supplier = { name: string; taxId: string | null; total: number; documents: number }
 type LargestExpense = { category: string; supplier: string; date: string; value: number; documentUrl: string | null }
-type PublicVote = { voteId: string; date: string; description: string; summary: string; url: string; candidateVote: string; classification: string; severity: string; scoreDelta: number; confidence: number | null; reason: string; source: string; analysisLevel: 1 | 2 | 3 | null; reviewedManually: boolean; analysisMethodVersion?: string; legislativeType?: string; decisionNature?: string; decisionScope?: string; voteObjectType?: string; voteObjectDescription?: string; yesMeans?: string; noMeans?: string; analyzedTextMatchesVoteObject?: string; scoreImpactLimit?: string; isProceduralVote?: boolean; declaredBenefit?: string; hiddenCost?: string; netPublicEffect?: string; hasTradeoff?: boolean; summaryMatchesText?: string; riskFlags?: string[]; criticalArticles?: Array<{ article: string; issue: string }> }
+type PublicVote = { voteId: string; date: string; description: string; summary: string; url: string; candidateVote: string; classification: string; severity: string; scoreDelta: number; scorePoints?: number | null; affectsScore?: boolean; analysisStatus?: string; riskLevel?: string; needsStrongReview?: boolean; reviewReason?: string; coverageCategory?: string; confidence: number | null; reason: string; source: string; analysisLevel: 1 | 2 | 3 | null; reviewedManually: boolean; analysisMethodVersion?: string; legislativeType?: string; decisionNature?: string; decisionScope?: string; voteObjectType?: string; voteObjectSubtype?: string; voteObjectDescription?: string; yesMeans?: string; noMeans?: string; voteObjectTextFound?: boolean; primaryTextUsed?: string; usedRelatedBillAsMainEvidence?: boolean; analyzedTextMatchesVoteObject?: string; scoreImpactLimit?: string; recommendedScoreImpact?: number | null; scoreSafetyReason?: string; modelRecommendation?: string; modelUsed?: string; modelRole?: string; isProceduralVote?: boolean; declaredBenefit?: string; hiddenCost?: string; netPublicEffect?: string; hasTradeoff?: boolean; summaryMatchesText?: string; riskFlags?: string[]; criticalArticles?: Array<{ article: string; issue: string; appearsInVoteObjectText?: boolean }> }
 type Amendment = { number: string; year: string; type: string; beneficiary: string; proposedValue: number; transferredValue: number }
 type Asset = { type: string; description: string; value: number }
 type CampaignDonor = { name: string; value: number }
@@ -357,197 +382,270 @@ function VoteDetailSheet({
   const method = analysisMethod(vote.source, vote.analysisLevel, vote.reviewedManually)
   const MethodIcon = method.Icon
   const reasonTitle = justificationTitle(vote.source, vote.analysisLevel, vote.reviewedManually)
+  const pendingSafeScore = analyzed && vote.scorePoints === null && vote.affectsScore === false
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
-        <SheetHeader className="pb-4 border-b">
-          <SheetTitle className="text-base">
-            Votação {vote.voteId}
-          </SheetTitle>
-          <SheetDescription>
-            {analyzed
-              ? "Detalhes completos da votação e do impacto no score"
-              : "Esta votação ainda não entrou no cálculo do score"}
-          </SheetDescription>
+      <SheetContent
+        side="right"
+        showCloseButton={false}
+        className="w-full overflow-y-auto data-[side=right]:w-full data-[side=right]:sm:max-w-2xl data-[side=right]:lg:max-w-4xl data-[side=right]:xl:max-w-5xl"
+      >
+        <SheetHeader className="sticky top-0 z-10 flex-row items-start justify-between gap-4 border-b bg-popover pb-4 sm:px-6 lg:px-8">
+          <div className="min-w-0">
+            <SheetTitle className="text-balance text-base">
+              Votação {vote.voteId}
+            </SheetTitle>
+            <SheetDescription>
+              {analyzed
+                ? "Detalhes completos da votação e do impacto no score"
+                : "Esta votação ainda não entrou no cálculo do score"}
+            </SheetDescription>
+          </div>
+          <SheetClose
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                className="-mr-3 -mt-2 size-10 shrink-0"
+              />
+            }
+          >
+            <XIcon />
+            <span className="sr-only">Fechar</span>
+          </SheetClose>
         </SheetHeader>
 
-        <div className="flex-1 space-y-5 p-4 pt-5">
-          <section>
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-              Dados oficiais
-            </h4>
-            <p className="text-sm leading-relaxed text-foreground">
-              {vote.description}
-            </p>
-            {vote.summary && (
-              <p className="text-sm leading-relaxed text-muted-foreground">
-                {vote.summary}
-              </p>
-            )}
-            <dl className="mt-4 grid grid-cols-2 gap-4">
-              <div>
-                <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                  Data
-                </dt>
-                <dd className="text-sm">{formatDate(vote.date)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                  Voto do parlamentar
-                </dt>
-                <dd className="text-sm font-medium">{candidateVoteLabel(vote.candidateVote)}</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section>
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-              Classificação
-            </h4>
-            <div className="flex flex-wrap gap-1.5">
-              <Badge
-                variant="secondary"
-                className={cn("text-[11px]", CLASSIFICATION_STYLES[vote.classification] || "")}
-              >
-                {publicVoteClassificationLabel(vote.classification)}
-              </Badge>
-              <Badge
-                variant="outline"
-                className={cn("text-[11px]", SEVERITY_STYLES[vote.severity] || "")}
-              >
-                {severityLabel(vote.severity)}
-              </Badge>
-              {vote.reviewedManually && (
-                <Badge variant="outline" className="text-[11px]">Revisado manualmente</Badge>
-              )}
-              <Badge variant="outline" className="inline-flex items-center gap-1 text-[11px]">
-                <MethodIcon className="size-3" />
-                {method.label}
-              </Badge>
-            </div>
-            {analyzed && (
-              <p className="mt-2 text-xs text-muted-foreground">
-                Confiança:{" "}
-                {vote.confidence === null ? "dados indisponíveis" : `${formatDecimal(vote.confidence * 100)}%`}
-              </p>
-            )}
-          </section>
-
-          <section>
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-              Saiba por quê
-            </h4>
-            <p className="text-xs font-medium text-muted-foreground">{reasonTitle}</p>
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              {vote.reason || "Esta votação ainda não foi classificada pela metodologia de valor público."}
-            </p>
-          </section>
-
-          {analyzed && (vote.analysisMethodVersion || vote.netPublicEffect || vote.voteObjectType) && (
+        <div className="grid flex-1 gap-6 px-4 py-5 sm:px-6 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-8 lg:px-8">
+          <div className="space-y-6">
             <section>
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                Auditoria N3
+              <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Dados oficiais
               </h4>
-              <dl className="grid grid-cols-2 gap-3 text-sm">
+              <p className="text-pretty text-sm leading-relaxed text-foreground">
+                {vote.description}
+              </p>
+              {vote.summary && (
+                <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
+                  {vote.summary}
+                </p>
+              )}
+              <dl className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Objeto</dt>
-                  <dd>{vote.voteObjectDescription || vote.voteObjectType || "-"}</dd>
+                  <dt className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Data
+                  </dt>
+                  <dd className="text-sm">{formatDate(vote.date)}</dd>
                 </div>
                 <div>
-                  <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tipo</dt>
-                  <dd>{vote.legislativeType || "-"}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Efeito líquido</dt>
-                  <dd>{netPublicEffectLabel(vote.netPublicEffect || "")}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Limite</dt>
-                  <dd>{scoreImpactLimitLabel(vote.scoreImpactLimit || "")}</dd>
+                  <dt className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Voto do parlamentar
+                  </dt>
+                  <dd className="text-sm font-medium">{candidateVoteLabel(vote.candidateVote)}</dd>
                 </div>
               </dl>
-              {(vote.yesMeans || vote.noMeans) && (
-                <div className="mt-3 space-y-2 text-sm text-muted-foreground">
-                  {vote.yesMeans && <p><span className="font-medium text-foreground">Sim:</span> {vote.yesMeans}</p>}
-                  {vote.noMeans && <p><span className="font-medium text-foreground">Não:</span> {vote.noMeans}</p>}
-                </div>
-              )}
-              {(vote.declaredBenefit || vote.hiddenCost) && (
-                <div className="mt-3 space-y-2 text-sm text-muted-foreground">
-                  {vote.declaredBenefit && <p><span className="font-medium text-foreground">Benefício declarado:</span> {vote.declaredBenefit}</p>}
-                  {vote.hiddenCost && <p><span className="font-medium text-foreground">Custo escondido:</span> {vote.hiddenCost}</p>}
-                </div>
-              )}
-              {vote.riskFlags && vote.riskFlags.filter((flag) => flag !== "none").length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {vote.riskFlags.filter((flag) => flag !== "none").map((flag) => (
-                    <Badge key={flag} variant="outline" className="text-[11px]">
-                      {riskFlagLabel(flag)}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-              {vote.criticalArticles && vote.criticalArticles.length > 0 && (
-                <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
-                  {vote.criticalArticles.map((item, index) => (
-                    <li key={`${item.article}-${index}`}>
-                      <span className="font-medium text-foreground">{item.article}:</span> {item.issue}
-                    </li>
-                  ))}
-                </ul>
+            </section>
+
+            <section className="border-t pt-5">
+              <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Saiba por quê
+              </h4>
+              <p className="text-xs font-medium text-muted-foreground">{reasonTitle}</p>
+              <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
+                {vote.reason || "Esta votação ainda não foi classificada pela metodologia de valor público."}
+              </p>
+            </section>
+
+            {analyzed && (vote.analysisMethodVersion || vote.netPublicEffect || vote.voteObjectType) && (
+              <section className="border-t pt-5">
+                <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Auditoria N3
+                </h4>
+                <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                  <div>
+                    <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</dt>
+                    <dd>{analysisStatusLabel(vote.analysisStatus || "")}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Risco</dt>
+                    <dd>{riskLevelLabel(vote.riskLevel || "")}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Objeto</dt>
+                    <dd>{vote.voteObjectDescription || vote.voteObjectType || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tipo</dt>
+                    <dd>{[vote.legislativeType, vote.voteObjectSubtype].filter(Boolean).join(" · ") || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Efeito líquido</dt>
+                    <dd>{netPublicEffectLabel(vote.netPublicEffect || "")}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Limite</dt>
+                    <dd>{scoreImpactLimitLabel(vote.scoreImpactLimit || "")}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Texto específico</dt>
+                    <dd>{vote.voteObjectTextFound ? "Encontrado" : "Não encontrado"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Evidência usada</dt>
+                    <dd>{vote.primaryTextUsed || "-"}</dd>
+                  </div>
+                </dl>
+                {(pendingSafeScore || vote.scoreSafetyReason || vote.usedRelatedBillAsMainEvidence || vote.netPublicEffect === "mixed" || vote.needsStrongReview) && (
+                  <div className="mt-3 space-y-1 rounded-md border bg-muted/30 p-3 text-pretty text-xs text-muted-foreground">
+                    {pendingSafeScore && (
+                      <p>Sem impacto no score: a auditoria mini-first deixou este caso pendente em vez de arriscar uma pontuação enviesada.</p>
+                    )}
+                    {vote.scoreSafetyReason && <p>{vote.scoreSafetyReason}</p>}
+                    {vote.needsStrongReview && vote.reviewReason && <p>{vote.reviewReason}</p>}
+                    {vote.usedRelatedBillAsMainEvidence && (
+                      <p>O sistema usou texto do projeto relacionado como contexto, não como prova suficiente do objeto específico votado.</p>
+                    )}
+                    {vote.netPublicEffect === "mixed" && (
+                      <p>O efeito público é misto; por segurança, o impacto no score foi zerado ou limitado.</p>
+                    )}
+                    {vote.recommendedScoreImpact !== null && vote.recommendedScoreImpact !== undefined && (
+                      <p>Impacto recomendado pela auditoria: {vote.recommendedScoreImpact > 0 ? "+" : ""}{formatDecimal(vote.recommendedScoreImpact)} pts.</p>
+                    )}
+                  </div>
+                )}
+                {(vote.yesMeans || vote.noMeans) && (
+                  <div className="mt-3 space-y-2 text-pretty text-sm text-muted-foreground">
+                    {vote.yesMeans && <p><span className="font-medium text-foreground">Sim:</span> {vote.yesMeans}</p>}
+                    {vote.noMeans && <p><span className="font-medium text-foreground">Não:</span> {vote.noMeans}</p>}
+                  </div>
+                )}
+                {(vote.declaredBenefit || vote.hiddenCost) && (
+                  <div className="mt-3 space-y-2 text-pretty text-sm text-muted-foreground">
+                    {vote.declaredBenefit && <p><span className="font-medium text-foreground">Benefício declarado:</span> {vote.declaredBenefit}</p>}
+                    {vote.hiddenCost && <p><span className="font-medium text-foreground">Custo escondido:</span> {vote.hiddenCost}</p>}
+                  </div>
+                )}
+                {vote.riskFlags && vote.riskFlags.filter((flag) => flag !== "none").length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {vote.riskFlags.filter((flag) => flag !== "none").map((flag) => (
+                      <Badge key={flag} variant="outline" className="text-[11px]">
+                        {riskFlagLabel(flag)}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                {vote.criticalArticles && vote.criticalArticles.length > 0 && (
+                  <ul className="mt-3 space-y-1 text-pretty text-xs text-muted-foreground">
+                    {vote.criticalArticles.map((item, index) => (
+                      <li key={`${item.article}-${index}`}>
+                        <span className="font-medium text-foreground">{item.article}:</span> {item.issue}
+                        {item.appearsInVoteObjectText === false && " · fora do objeto votado"}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )}
+          </div>
+
+          <aside className="space-y-6 border-t pt-5 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+            <section>
+              <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Classificação
+              </h4>
+              <div className="flex flex-wrap gap-1.5">
+                <Badge
+                  variant="secondary"
+                  className={cn("text-[11px]", CLASSIFICATION_STYLES[vote.classification] || "")}
+                >
+                  {publicVoteClassificationLabel(vote.classification)}
+                </Badge>
+                <Badge
+                  variant="outline"
+                  className={cn("text-[11px]", SEVERITY_STYLES[vote.severity] || "")}
+                >
+                  {severityLabel(vote.severity)}
+                </Badge>
+                {vote.reviewedManually && (
+                  <Badge variant="outline" className="text-[11px]">Revisado manualmente</Badge>
+                )}
+                <Badge variant="outline" className="inline-flex items-center gap-1 text-[11px]">
+                  <MethodIcon className="size-3" />
+                  {method.label}
+                </Badge>
+                {vote.analysisStatus && (
+                  <Badge variant="outline" className="text-[11px]">
+                    {analysisStatusLabel(vote.analysisStatus)}
+                  </Badge>
+                )}
+              </div>
+              {analyzed && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Confiança:{" "}
+                  {vote.confidence === null ? "dados indisponíveis" : `${formatDecimal(vote.confidence * 100)}%`}
+                </p>
               )}
             </section>
-          )}
 
-          <section>
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-              Impacto
-            </h4>
-            <div className="space-y-1">
-              <p className={cn(
-                "text-lg font-semibold tabular-nums",
-                vote.scoreDelta < 0
-                  ? "text-red-700 dark:text-red-400"
-                  : vote.scoreDelta > 0
-                    ? "text-emerald-700 dark:text-emerald-400"
-                    : "text-muted-foreground",
-              )}>
-                {vote.scoreDelta > 0 ? "+" : ""}{formatDecimal(vote.scoreDelta)} pts
-              </p>
-              <ul className="space-y-0.5 text-xs text-muted-foreground">
-                {analyzed ? (
-                  <>
-                    {vote.severity ? (
-                      <li>Pontos base da severidade ({severityLabel(vote.severity)}): {points}</li>
-                    ) : (
-                      <li>Classificação detalhada indisponível neste registro.</li>
-                    )}
-                    {vote.candidateVote === "absent" && (
-                      <li>Ausência em votação de severidade {severityLabel(vote.severity)}</li>
-                    )}
-                    {vote.scoreImpactLimit === "none" && (
-                      <li>Impacto zerado porque não há base suficiente para concluir com segurança.</li>
-                    )}
-                    {vote.scoreImpactLimit === "low" && (
-                      <li>Impacto limitado porque o objeto ou texto específico não permite conclusão forte.</li>
-                    )}
-                    {vote.analyzedTextMatchesVoteObject === "false" && (
-                      <li>Texto analisado não corresponde ao objeto exato da votação.</li>
-                    )}
-                    {vote.severity && vote.candidateVote !== "absent" && vote.candidateVote !== "abstain" && (
-                      <li>Voto {aligned ? "alinhado" : "contrário"} ao interesse público</li>
-                    )}
-                  </>
-                ) : (
-                  <li>Esta votação ainda não entrou no cálculo do score.</li>
-                )}
-                <li>Método: {method.label}</li>
-              </ul>
-            </div>
-          </section>
+            <section className="border-t pt-5">
+              <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Impacto
+              </h4>
+              <div className="space-y-1">
+                <p className={cn(
+                  "text-lg font-semibold tabular-nums",
+                  vote.scoreDelta < 0
+                    ? "text-red-700 dark:text-red-400"
+                    : vote.scoreDelta > 0
+                      ? "text-emerald-700 dark:text-emerald-400"
+                      : "text-muted-foreground",
+                )}>
+                  {vote.scorePoints === null ? "pendente" : `${vote.scoreDelta > 0 ? "+" : ""}${formatDecimal(vote.scoreDelta)} pts`}
+                </p>
+                <ul className="space-y-0.5 text-pretty text-xs text-muted-foreground">
+                  {analyzed ? (
+                    <>
+                      {pendingSafeScore && (
+                        <li>Não pontua porque precisa de texto específico, revisão forte ou evidência mais segura.</li>
+                      )}
+                      {vote.severity ? (
+                        <li>Pontos base da severidade ({severityLabel(vote.severity)}): {points}</li>
+                      ) : (
+                        <li>Classificação detalhada indisponível neste registro.</li>
+                      )}
+                      {vote.scorePoints === 0 && vote.analysisStatus === "neutral_validated" && (
+                        <li>Analisado como neutro: entra na cobertura, mas não altera o ranking.</li>
+                      )}
+                      {vote.candidateVote === "absent" && (
+                        <li>Ausência em votação de severidade {severityLabel(vote.severity)}</li>
+                      )}
+                      {vote.scoreImpactLimit === "none" && (
+                        <li>Impacto zerado porque não há base suficiente para concluir com segurança.</li>
+                      )}
+                      {vote.scoreImpactLimit === "low" && (
+                        <li>Impacto limitado porque o objeto ou texto específico não permite conclusão forte.</li>
+                      )}
+                      {vote.voteObjectTextFound === false && (vote.analysisMethodVersion?.includes("v3") || vote.analysisMethodVersion?.includes("v4")) && (
+                        <li>Texto específico do objeto votado não encontrado; N3 bloqueou impacto no score.</li>
+                      )}
+                      {vote.primaryTextUsed && vote.primaryTextUsed !== "vote_object" && (vote.analysisMethodVersion?.includes("v3") || vote.analysisMethodVersion?.includes("v4")) && (
+                        <li>A evidência principal não foi o texto exato do objeto votado.</li>
+                      )}
+                      {vote.analyzedTextMatchesVoteObject === "false" && (
+                        <li>Texto analisado não corresponde ao objeto exato da votação.</li>
+                      )}
+                      {vote.severity && vote.candidateVote !== "absent" && vote.candidateVote !== "abstain" && (
+                        <li>Voto {aligned ? "alinhado" : "contrário"} ao interesse público</li>
+                      )}
+                    </>
+                  ) : (
+                    <li>Esta votação ainda não entrou no cálculo do score.</li>
+                  )}
+                  <li>Método: {method.label}</li>
+                </ul>
+              </div>
+            </section>
 
-          <div className="pt-2">
             <a
               href={vote.url}
               target="_blank"
@@ -560,7 +658,7 @@ function VoteDetailSheet({
               <ExternalLink className="size-3.5" />
               Abrir na Câmara
             </a>
-          </div>
+          </aside>
         </div>
       </SheetContent>
     </Sheet>
@@ -763,21 +861,23 @@ export function PublicVotesTable({ data }: { data: PublicVote[] }) {
       id: "impacto",
       header: "Impacto",
       sortable: true,
-      sortValue: (vote) => vote.scoreDelta,
+      sortValue: (vote) => vote.scorePoints ?? 0,
       className: "w-[82px]",
       headerClassName: "w-[82px]",
       cell: (vote) => (
         <span
           className={cn(
             "text-xs font-semibold tabular-nums",
-            vote.scoreDelta < 0
+            vote.scorePoints === null
+              ? "text-muted-foreground"
+              : vote.scoreDelta < 0
               ? "text-red-700 dark:text-red-400"
               : vote.scoreDelta > 0
                 ? "text-emerald-700 dark:text-emerald-400"
                 : "text-muted-foreground",
           )}
         >
-          {vote.scoreDelta > 0 ? "+" : ""}{formatDecimal(vote.scoreDelta)}
+          {vote.scorePoints === null ? "pendente" : `${vote.scoreDelta > 0 ? "+" : ""}${formatDecimal(vote.scoreDelta)}`}
         </span>
       ),
     },

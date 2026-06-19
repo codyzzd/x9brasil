@@ -870,7 +870,7 @@ function classifyProposalFull(proposalId: string, summary: string, _role: Partic
 async function getDeputyVotes(legislatorId: number, periodId: string) {
   const { data } = await supabase
     .from("legislator_votes")
-    .select("vote_id, candidate_vote, score_delta, confidence, reason, source, reviewed_manually, votes(id, vote_date, description, summary, url)")
+    .select("vote_id, candidate_vote, score_delta, score_points, affects_score, analysis_status, needs_strong_review, review_reason, coverage_category, score_safety_reason, model_used, model_role, confidence, reason, source, reviewed_manually, votes(id, vote_date, description, summary, url)")
     .eq("legislator_id", legislatorId)
     .eq("period_id", periodId);
 
@@ -878,7 +878,7 @@ async function getDeputyVotes(legislatorId: number, periodId: string) {
 
   const { data: classifications } = await supabase
     .from("vote_classifications")
-    .select("vote_id, classification, severity, source, analysis_level, reviewed_manually, analysis_method_version, legislative_type, decision_nature, decision_scope, vote_object_type, vote_object_description, yes_means, no_means, analyzed_text_matches_vote_object, score_impact_limit, is_procedural_vote, declared_benefit, hidden_cost, net_public_effect, has_tradeoff, summary_matches_text, risk_flags, critical_articles")
+    .select("vote_id, classification, severity, source, analysis_level, reviewed_manually, analysis_method_version, legislative_type, decision_nature, decision_scope, vote_object_type, vote_object_description, yes_means, no_means, analyzed_text_matches_vote_object, score_impact_limit, is_procedural_vote, declared_benefit, hidden_cost, net_public_effect, has_tradeoff, summary_matches_text, risk_flags, critical_articles, analysis_payload, model_used, model_role, analysis_status, risk_level, needs_strong_review, review_reason, coverage_category, affects_score, score_safety_reason")
     .in("vote_id", data.map((r: Record<string, unknown>) => r.vote_id));
 
   const classMap = new Map((classifications ?? []).map((c: Record<string, unknown>) => [c.vote_id as string, c]));
@@ -887,6 +887,9 @@ async function getDeputyVotes(legislatorId: number, periodId: string) {
     .map((row: Record<string, unknown>) => {
       const vote = row.votes as Record<string, unknown> | null;
       const cls = classMap.get(row.vote_id as string) as Record<string, unknown> | undefined;
+      const payload = (cls?.analysis_payload && typeof cls.analysis_payload === "object"
+        ? cls.analysis_payload
+        : {}) as Record<string, unknown>;
       const hasLinkAnalysis =
         row.confidence !== null ||
         Boolean(row.reason) ||
@@ -903,6 +906,13 @@ async function getDeputyVotes(legislatorId: number, periodId: string) {
         classification: (cls?.classification as string) ?? (hasLinkAnalysis ? "analyzed" : "unanalyzed"),
         severity: (cls?.severity as string) ?? "",
         scoreDelta: Number(row.score_delta),
+        scorePoints: row.score_points === null || row.score_points === undefined ? null : Number(row.score_points),
+        affectsScore: ((row.affects_score as boolean | null) ?? (cls?.affects_score as boolean | null)) ?? false,
+        analysisStatus: ((row.analysis_status as string | null) ?? (cls?.analysis_status as string | null)) ?? "",
+        riskLevel: (cls?.risk_level as string) ?? "",
+        needsStrongReview: ((row.needs_strong_review as boolean | null) ?? (cls?.needs_strong_review as boolean | null)) ?? false,
+        reviewReason: ((row.review_reason as string | null) ?? (cls?.review_reason as string | null)) ?? "",
+        coverageCategory: ((row.coverage_category as string | null) ?? (cls?.coverage_category as string | null)) ?? "",
         confidence: row.confidence === null || row.confidence === undefined ? null : Number(row.confidence),
         reason: (row.reason as string) ?? "",
         source: (cls?.source as string) ?? (row.source as string) ?? "",
@@ -913,11 +923,20 @@ async function getDeputyVotes(legislatorId: number, periodId: string) {
         decisionNature: (cls?.decision_nature as string) ?? "",
         decisionScope: (cls?.decision_scope as string) ?? "",
         voteObjectType: (cls?.vote_object_type as string) ?? "",
+        voteObjectSubtype: (payload.voteObjectSubtype as string) ?? "",
         voteObjectDescription: (cls?.vote_object_description as string) ?? "",
         yesMeans: (cls?.yes_means as string) ?? "",
         noMeans: (cls?.no_means as string) ?? "",
+        voteObjectTextFound: (payload.voteObjectTextFound as boolean | null) ?? false,
+        primaryTextUsed: (payload.primaryTextUsed as string) ?? "",
+        usedRelatedBillAsMainEvidence: (payload.usedRelatedBillAsMainEvidence as boolean | null) ?? false,
         analyzedTextMatchesVoteObject: (cls?.analyzed_text_matches_vote_object as string) ?? "",
         scoreImpactLimit: (cls?.score_impact_limit as string) ?? "",
+        recommendedScoreImpact: typeof payload.recommendedScoreImpact === "number" ? payload.recommendedScoreImpact : null,
+        scoreSafetyReason: ((row.score_safety_reason as string | null) ?? (cls?.score_safety_reason as string | null) ?? (payload.scoreSafetyReason as string)) ?? "",
+        modelRecommendation: (payload.modelRecommendation as string) ?? "",
+        modelUsed: ((row.model_used as string | null) ?? (cls?.model_used as string | null) ?? (payload.modelUsed as string)) ?? "",
+        modelRole: ((row.model_role as string | null) ?? (cls?.model_role as string | null) ?? (payload.modelRole as string)) ?? "",
         isProceduralVote: (cls?.is_procedural_vote as boolean | null) ?? false,
         declaredBenefit: (cls?.declared_benefit as string) ?? "",
         hiddenCost: (cls?.hidden_cost as string) ?? "",

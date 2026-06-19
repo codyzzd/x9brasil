@@ -5,7 +5,10 @@ import {
   classifyPublicVote,
   classifyProposal,
   getProposalWeight,
+  inferVoteObjectSubtype,
+  inferVoteObjectType,
   normalizeVoteAnalysis,
+  publicVoteScoreDecision,
   proposalContributionPoints,
   publicVoteScoreDelta,
   type ParticipationRole,
@@ -120,7 +123,8 @@ function voteFixture(overrides: Partial<PublicVoteAnalysis> = {}): PublicVoteAna
     source: "llm",
     analysisLevel: 3,
     reviewedManually: false,
-    methodologyVersion: "legislative-impact-v2",
+    methodologyVersion: "legislative-impact-v3-strong-model",
+    analysisMethodVersion: "legislative-impact-v3-strong-model",
     ...overrides,
   });
 }
@@ -142,12 +146,15 @@ test("limits apparent benefit with hidden workload cost", () => {
 test("does not treat vote against amendment as vote against whole bill when object text is unclear", () => {
   const analysis = voteFixture({
     voteObjectType: "amendment",
+    voteObjectTextFound: false,
+    primaryTextUsed: "related_bill",
+    usedRelatedBillAsMainEvidence: true,
     analyzedTextMatchesVoteObject: "unclear",
     scoreImpactLimit: "low",
     confidence: 0.6,
-    riskFlags: ["unrelated_amendment"],
+    riskFlags: ["unrelated_amendment", "insufficient_vote_object_text"],
   });
-  assert.equal(publicVoteScoreDelta(analysis, "no"), -3);
+  assert.equal(publicVoteScoreDelta(analysis, "no"), 0);
 });
 
 test("keeps urgency request procedural and low impact", () => {
@@ -173,15 +180,22 @@ test("caps RIC/PFC-style oversight impact at medium", () => {
   assert.equal(publicVoteScoreDelta(analysis, "yes"), 8);
 });
 
-test("keeps PEC without full text uncertain and low confidence", () => {
+test("keeps PEC without full text pending under mini-first safety", () => {
   const analysis = voteFixture({
     legislativeType: "PEC",
     confidence: 0.6,
     scoreImpactLimit: "low",
     netPublicEffect: "unclear",
     riskFlags: ["insufficient_text"],
+    modelUsed: "gpt-5.4-mini",
+    modelRole: "triage",
+    analysisMethodVersion: "legislative-impact-v4-mini-first-safe-score",
+    methodologyVersion: "legislative-impact-v4-mini-first-safe-score",
   });
-  assert.equal(publicVoteScoreDelta(analysis, "yes"), 3);
+  const decision = publicVoteScoreDecision(analysis, "yes");
+  assert.equal(decision.scoreDelta, 0);
+  assert.equal(decision.scorePoints, null);
+  assert.equal(decision.analysisStatus, "insufficient_data");
 });
 
 test("zeros score when analyzed text does not match vote object", () => {
@@ -190,6 +204,120 @@ test("zeros score when analyzed text does not match vote object", () => {
     riskFlags: ["text_does_not_match_vote_object"],
   });
   assert.equal(publicVoteScoreDelta(analysis, "yes"), 0);
+});
+
+test("infers DTQ over EMP as highlight with amendment subtype", () => {
+  const description = "PL 347/2003 - DTQ 1 - Bloco União - Emenda de Plenário nº 7";
+  assert.equal(inferVoteObjectType(description), "highlight");
+  assert.equal(inferVoteObjectSubtype(description), "amendment");
+});
+
+test("EMP 7 / PL 347 fixture never becomes a high penalty without specific object text", () => {
+  const analysis = voteFixture({
+    classification: "neutral",
+    severity: "high",
+    publicInterestVote: "any",
+    voteObjectType: "highlight",
+    voteObjectSubtype: "amendment",
+    voteObjectTextFound: false,
+    primaryTextUsed: "related_bill",
+    usedRelatedBillAsMainEvidence: true,
+    analyzedTextMatchesVoteObject: "unclear",
+    netPublicEffect: "mixed",
+    scoreImpactLimit: "none",
+    recommendedScoreImpact: 0,
+    riskFlags: ["hidden_exception", "insufficient_vote_object_text"],
+    modelUsed: "gpt-5.4-mini",
+    modelRole: "triage",
+    analysisMethodVersion: "legislative-impact-v4-mini-first-safe-score",
+    methodologyVersion: "legislative-impact-v4-mini-first-safe-score",
+  });
+  const decision = publicVoteScoreDecision(analysis, "no");
+  assert.equal(decision.scoreDelta, 0);
+  assert.equal(decision.scorePoints, null);
+  assert.equal(decision.affectsScore, false);
+  assert.match(decision.analysisStatus, /mixed_requires_review|pending_strong_review|insufficient_data/);
+});
+
+test("mini model caps safe main bill score and leaves unsafe specific objects pending", () => {
+  const mainBill = voteFixture({
+    modelUsed: "gpt-5.4-mini",
+    modelRole: "triage",
+    analysisMethodVersion: "legislative-impact-v4-mini-first-safe-score",
+    methodologyVersion: "legislative-impact-v4-mini-first-safe-score",
+    scoreImpactLimit: "critical",
+    severity: "critical",
+  });
+  assert.equal(publicVoteScoreDelta(mainBill, "yes"), 12);
+
+  const amendment = voteFixture({
+    modelUsed: "gpt-5.4-mini",
+    modelRole: "triage",
+    analysisMethodVersion: "legislative-impact-v4-mini-first-safe-score",
+    methodologyVersion: "legislative-impact-v4-mini-first-safe-score",
+    voteObjectType: "amendment",
+    voteObjectTextFound: false,
+    primaryTextUsed: "related_bill",
+    usedRelatedBillAsMainEvidence: true,
+    analyzedTextMatchesVoteObject: "unclear",
+  });
+  const decision = publicVoteScoreDecision(amendment, "yes");
+  assert.equal(decision.scoreDelta, 0);
+  assert.equal(decision.scorePoints, null);
+  assert.equal(decision.affectsScore, false);
+});
+
+test("mini model can score clear substitute object only within specific-object cap", () => {
+  const substitute = voteFixture({
+    modelUsed: "gpt-5.4-mini",
+    modelRole: "triage",
+    analysisMethodVersion: "legislative-impact-v4-mini-first-safe-score",
+    methodologyVersion: "legislative-impact-v4-mini-first-safe-score",
+    voteObjectType: "substitute",
+    voteObjectTextFound: true,
+    primaryTextUsed: "vote_object",
+    usedRelatedBillAsMainEvidence: false,
+    analyzedTextMatchesVoteObject: "true",
+    scoreImpactLimit: "high",
+    severity: "high",
+  });
+  const decision = publicVoteScoreDecision(substitute, "yes");
+  assert.equal(decision.scorePoints, 8);
+  assert.equal(decision.analysisStatus, "validated");
+});
+
+test("strong review can validate safe N3 cases below mini confidence threshold", () => {
+  const analysis = voteFixture({
+    modelUsed: "gpt-5.5",
+    modelRole: "strong_review",
+    analysisMethodVersion: "legislative-impact-v4-mini-first-safe-score",
+    methodologyVersion: "legislative-impact-v4-mini-first-safe-score",
+    confidence: 0.72,
+    scoreImpactLimit: "medium",
+    severity: "medium",
+    voteObjectType: "main_bill",
+    netPublicEffect: "positive",
+    analysisStatus: "validated",
+    needsStrongReview: false,
+  });
+  const decision = publicVoteScoreDecision(analysis, "yes");
+  assert.equal(decision.scorePoints, 8);
+  assert.equal(decision.analysisStatus, "validated");
+});
+
+test("mixed effect blocks a directional public-interest vote", () => {
+  const analysis = voteFixture({
+    publicInterestVote: "any",
+    netPublicEffect: "mixed",
+    scoreImpactLimit: "none",
+    modelUsed: "gpt-5.4-mini",
+    modelRole: "triage",
+    analysisMethodVersion: "legislative-impact-v4-mini-first-safe-score",
+    methodologyVersion: "legislative-impact-v4-mini-first-safe-score",
+  });
+  const decision = publicVoteScoreDecision(analysis, "yes");
+  assert.equal(decision.scoreDelta, 0);
+  assert.equal(decision.scorePoints, null);
 });
 
 test("getProposalWeight: author+substantive presented = 2 (base)", () => {

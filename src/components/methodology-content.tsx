@@ -242,8 +242,8 @@ function PublicValueSection({
             <AnalysisLevel
               icon={Layers}
               label="N3"
-              title="Auditoria profunda"
-              text="Em teste. Usa inteiro teor quando disponível, identifica o objeto real da votação, efeito líquido, riscos e limites de impacto no score."
+              title="Auditoria segura"
+              text="Em teste. Usa triagem mini-first para pontuar apenas casos seguros; casos ambíguos ficam pendentes para revisão forte."
             />
           </div>
           <p>
@@ -254,10 +254,11 @@ function PublicValueSection({
             cálculo que dependem de classificação.
           </p>
           <p>
-            No N3, votações sobre emenda, destaque, substitutivo ou procedimento
-            recebem travas adicionais: se o sistema não consegue confirmar o
-            objeto exato votado ou se o texto analisado não corresponde a esse
-            objeto, o impacto no score é zerado ou limitado.
+            No N3 v4, votações sobre emenda, destaque, substitutivo, votação em
+            separado ou procedimento recebem travas adicionais: se o texto
+            específico do objeto votado não foi encontrado, se a análise usou
+            apenas o projeto relacionado como evidência principal, ou se o mini
+            detectou risco alto, o caso fica pendente e não altera o score.
           </p>
         </div>
       </div>
