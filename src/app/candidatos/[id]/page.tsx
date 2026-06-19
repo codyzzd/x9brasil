@@ -49,7 +49,7 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  getDeputies,
+  getDeputy,
   getFullSnapshot,
   getProfileDetails,
   getPeriodOptions,
@@ -69,6 +69,7 @@ import {
   materializePeriod,
   periodSelectOrder,
   publicValueScoreLabel,
+  top3Share,
   type PublicValueRankedDeputy,
   type RankChange,
   type RankedDeputy,
@@ -81,14 +82,14 @@ import { getSnapshotMetadata } from "@/lib/db";
 import { scoreStyle } from "@/lib/score-style";
 import { cn } from "@/lib/utils";
 import { labelTone } from "@/lib/label-tone";
-import { ProposalsTable } from "@/components/proposals-table";
+import {
+  LazyProposalsTable,
+  LazyPublicVotesTable,
+} from "@/components/candidate-profile-lazy-tables";
 import {
   ExpenseCategoriesTable,
   LargestExpensesTable,
   SuppliersTable,
-  PublicVotesTable,
-  VoteDistributionBar,
-  VotePositioningBar,
   AmendmentsTable,
   AssetsTable,
   CampaignDonorsTable,
@@ -105,15 +106,9 @@ type PageProps = {
   }>;
 };
 
-export async function generateStaticParams() {
-  const deputies = await getDeputies();
-  return deputies.map((deputy) => ({ id: deputy.slug }));
-}
-
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { id } = await params;
-  const snapshot = await getFullSnapshot();
-  const deputy = snapshot.deputies.find((item) => item.slug === id);
+  const deputy = await getDeputy(id);
   return {
     title: deputy?.name ?? "Deputado",
     description: deputy
@@ -147,6 +142,24 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
   const profile = await getProfileDetails(deputy.id, period.id);
   const identityDetails = profile.identity;
   const periodDetails = profile.period;
+  const campaignDonors = periodDetails?.campaignDonors?.length
+    ? periodDetails.campaignDonors
+    : ranked.metrics.topDonors;
+  const campaignSuppliers = periodDetails?.campaignSuppliers?.length
+    ? periodDetails.campaignSuppliers
+    : ranked.metrics.topSuppliers;
+  const campaignDonorsCount =
+    ranked.metrics.campaignDonorsCount ?? campaignDonors.length;
+  const campaignSuppliersCount =
+    ranked.metrics.campaignSuppliersCount ?? campaignSuppliers.length;
+  const campaignDonorTop3Share = top3Share(
+    ranked.metrics.campaignDonorTop3Share,
+    campaignDonors,
+  );
+  const campaignSupplierTop3Share = top3Share(
+    ranked.metrics.campaignSupplierTop3Share,
+    campaignSuppliers,
+  );
 
   const previousPeriod = comparisonPeriod(
     snapshot,
@@ -438,11 +451,7 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      {periodDetails?.proposals.length ? (
-                        <ProposalsTable proposals={periodDetails.proposals} />
-                      ) : (
-                        <EmptyData text="Nenhuma proposta encontrada no período." />
-                      )}
+                      <LazyProposalsTable candidateSlug={ranked.slug} periodId={period.id} />
                     </CardContent>
                   </Card>
                 </div>
@@ -464,9 +473,6 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                      {periodDetails?.publicVotes?.length ? (
-                        <VotePositioningBar data={periodDetails.publicVotes} />
-                      ) : null}
                       <MetricCard
                         icon={CheckCircle2}
                         tone="emerald"
@@ -510,16 +516,7 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      {periodDetails?.publicVotes?.length ? (
-                        <>
-                          <VoteDistributionBar data={periodDetails.publicVotes} />
-                          <div className="mt-5">
-                            <PublicVotesTable data={periodDetails.publicVotes} />
-                          </div>
-                        </>
-                      ) : (
-                        <EmptyData text="Nenhuma votação nominal encontrada no período." />
-                      )}
+                      <LazyPublicVotesTable candidateSlug={ranked.slug} periodId={period.id} />
                     </CardContent>
                   </Card>
                 </div>
@@ -781,13 +778,13 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                       tone="violet"
                       label="Concentração de receitas"
                       value={
-                        ranked.metrics.topDonors?.length > 0
-                          ? formatDecimal((ranked.metrics.topDonors.slice(0, 3).reduce((s: number, d: { value: number }) => s + d.value, 0) / ranked.metrics.topDonors.reduce((s: number, d: { value: number }) => s + d.value, 0)) * 100) + "%"
+                        campaignDonorTop3Share !== null
+                          ? formatDecimal(campaignDonorTop3Share * 100) + "%"
                           : null
                       }
                       detail={
-                        ranked.metrics.topDonors?.length > 0
-                          ? `3 maiores doadores entre ${ranked.metrics.topDonors.length} declarados`
+                        campaignDonorsCount > 0
+                          ? `3 maiores doadores entre ${campaignDonorsCount} declarados`
                           : "Dados indisponíveis"
                       }
                     />
@@ -796,13 +793,13 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                       tone="red"
                       label="Concentração de despesas"
                       value={
-                        ranked.metrics.topSuppliers?.length > 0
-                          ? formatDecimal((ranked.metrics.topSuppliers.slice(0, 3).reduce((s: number, d: { value: number }) => s + d.value, 0) / ranked.metrics.topSuppliers.reduce((s: number, d: { value: number }) => s + d.value, 0)) * 100) + "%"
+                        campaignSupplierTop3Share !== null
+                          ? formatDecimal(campaignSupplierTop3Share * 100) + "%"
                           : null
                       }
                       detail={
-                        ranked.metrics.topSuppliers?.length > 0
-                          ? `3 maiores fornecedores entre ${ranked.metrics.topSuppliers.length} declarados`
+                        campaignSuppliersCount > 0
+                          ? `3 maiores fornecedores entre ${campaignSuppliersCount} declarados`
                           : "Dados indisponíveis"
                       }
                     />
@@ -834,7 +831,7 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                     </CardContent>
                   </Card>
 
-                  {ranked.metrics.topDonors?.length > 0 && (
+                  {campaignDonors.length > 0 && (
                     <Card>
                       <CardHeader>
                         <CardTitle>Principais doadores</CardTitle>
@@ -843,12 +840,12 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                         </CardDescription>
                       </CardHeader>
                       <CardContent>
-                        <CampaignDonorsTable data={ranked.metrics.topDonors} />
+                        <CampaignDonorsTable data={campaignDonors} />
                       </CardContent>
                     </Card>
                   )}
 
-                  {ranked.metrics.topSuppliers?.length > 0 && (
+                  {campaignSuppliers.length > 0 && (
                     <Card>
                       <CardHeader>
                         <CardTitle>Principais fornecedores</CardTitle>
@@ -857,7 +854,7 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                         </CardDescription>
                       </CardHeader>
                       <CardContent>
-                        <CampaignSuppliersTable data={ranked.metrics.topSuppliers} />
+                        <CampaignSuppliersTable data={campaignSuppliers} />
                       </CardContent>
                     </Card>
                   )}

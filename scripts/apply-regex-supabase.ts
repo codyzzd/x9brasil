@@ -259,7 +259,6 @@ async function updateLegislatorVotes(analyses: Map<string, PublicVoteAnalysis>) 
       candidate_vote: link.candidate_vote,
       score_delta: record.scoreDelta,
       confidence: record.confidence,
-      reason: record.reason,
       source: record.source,
       reviewed_manually: record.reviewedManually,
     }];

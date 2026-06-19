@@ -4,6 +4,7 @@ import type {
   RankingIndex,
   RawMetrics,
 } from "@/lib/ranking";
+import { top3Share } from "@/lib/ranking";
 import { PUBLIC_VALUE_DIMENSION_LABELS } from "@/lib/public-value";
 
 export type DimensionExplanation = {
@@ -654,8 +655,8 @@ function campaignFinanceExplanation(metrics: RawMetrics): DimensionExplanation {
     details: [
       `Custo por voto: ${costPerVote}`,
       `Dependência de dinheiro público: ${publicDep}`,
-      `Doadores declarados: ${formatInteger(metrics.topDonors?.length ?? 0)}`,
-      `Fornecedores declarados: ${formatInteger(metrics.topSuppliers?.length ?? 0)}`,
+      `Doadores declarados: ${formatInteger(metrics.campaignDonorsCount ?? metrics.topDonors?.length ?? 0)}`,
+      `Fornecedores declarados: ${formatInteger(metrics.campaignSuppliersCount ?? metrics.topSuppliers?.length ?? 0)}`,
     ],
   };
 }
@@ -672,11 +673,13 @@ function campaignFinanceCardInfo(
     metrics.totalPublicReceipts !== null && metrics.totalCampaignReceipts !== null && metrics.totalCampaignReceipts > 0
       ? formatPercent(metrics.totalPublicReceipts / metrics.totalCampaignReceipts * 100)
       : "—";
-  const donorConc = metrics.topDonors?.length > 0
-    ? formatPercent(metrics.topDonors.slice(0, 3).reduce((s, d) => s + d.value, 0) / metrics.topDonors.reduce((s, d) => s + d.value, 0) * 100)
+  const donorShare = top3Share(metrics.campaignDonorTop3Share, metrics.topDonors);
+  const supplierShare = top3Share(metrics.campaignSupplierTop3Share, metrics.topSuppliers);
+  const donorConc = donorShare !== null
+    ? formatPercent(donorShare * 100)
     : "—";
-  const supplierConc = metrics.topSuppliers?.length > 0
-    ? formatPercent(metrics.topSuppliers.slice(0, 3).reduce((s, d) => s + d.value, 0) / metrics.topSuppliers.reduce((s, d) => s + d.value, 0) * 100)
+  const supplierConc = supplierShare !== null
+    ? formatPercent(supplierShare * 100)
     : "—";
   const patrimonyLabel = !metrics.assetsAvailable
     ? "—"
@@ -743,13 +746,15 @@ function campaignFinanceSteps(
     indicators.push(`Dep. dinheiro público: ${formatPercent(pct)}`);
     weights.push("25%");
   }
-  if (metrics.topDonors?.length > 0) {
-    const conc = metrics.topDonors.slice(0, 3).reduce((s, d) => s + d.value, 0) / metrics.topDonors.reduce((s, d) => s + d.value, 0) * 100;
+  const donorShare = top3Share(metrics.campaignDonorTop3Share, metrics.topDonors);
+  const supplierShare = top3Share(metrics.campaignSupplierTop3Share, metrics.topSuppliers);
+  if (donorShare !== null) {
+    const conc = donorShare * 100;
     indicators.push(`Conc. receitas: ${formatPercent(conc)}`);
     weights.push("15%");
   }
-  if (metrics.topSuppliers?.length > 0) {
-    const conc = metrics.topSuppliers.slice(0, 3).reduce((s, d) => s + d.value, 0) / metrics.topSuppliers.reduce((s, d) => s + d.value, 0) * 100;
+  if (supplierShare !== null) {
+    const conc = supplierShare * 100;
     indicators.push(`Conc. despesas: ${formatPercent(conc)}`);
     weights.push("15%");
   }

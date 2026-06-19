@@ -41,6 +41,10 @@ export type RawMetrics = {
   totalCampaignReceipts: number | null;
   totalPublicReceipts: number | null;
   totalCampaignExpenses: number | null;
+  campaignDonorsCount?: number;
+  campaignDonorTop3Share?: number | null;
+  campaignSuppliersCount?: number;
+  campaignSupplierTop3Share?: number | null;
   topDonors: Array<{ name: string; value: number }>;
   topSuppliers: Array<{ name: string; value: number }>;
   publicContributionPoints?: number | null;
@@ -171,6 +175,8 @@ export type ProfilePeriodDetails = {
     proposedValue: number;
     transferredValue: number;
   }>;
+  campaignDonors: Array<{ name: string; value: number }>;
+  campaignSuppliers: Array<{ name: string; value: number }>;
 };
 
 export type ProfileDetailsSnapshot = {
@@ -426,19 +432,32 @@ export function campaignFinanceScore(metrics: RawMetrics, assetsTotal: number | 
     metrics.totalPublicReceipts != null && metrics.totalCampaignReceipts != null && metrics.totalCampaignReceipts > 0
       ? metrics.totalPublicReceipts / metrics.totalCampaignReceipts
       : null;
-  const donorConcentration = metrics.topDonors?.length > 0
-    ? metrics.topDonors.slice(0, 3).reduce((s, d) => s + d.value, 0) /
-      metrics.topDonors.reduce((s, d) => s + d.value, 0)
-    : null;
-  const supplierConcentration = metrics.topSuppliers?.length > 0
-    ? metrics.topSuppliers.slice(0, 3).reduce((s, d) => s + d.value, 0) /
-      metrics.topSuppliers.reduce((s, d) => s + d.value, 0)
-    : null;
+  const donorConcentration = top3Share(
+    metrics.campaignDonorTop3Share,
+    metrics.topDonors,
+  );
+  const supplierConcentration = top3Share(
+    metrics.campaignSupplierTop3Share,
+    metrics.topSuppliers,
+  );
   const patrimonyConsistency =
     !metrics.assetsAvailable ? null
     : (assetsTotal === null || assetsTotal === 0) ? 20
     : 75;
   return { costPerVote, publicDependency, donorConcentration, supplierConcentration, patrimonyConsistency };
+}
+
+export function top3Share(
+  materialized: number | null | undefined,
+  rows: Array<{ value: number }>,
+) {
+  if (materialized !== null && materialized !== undefined) return materialized;
+  if (rows.length === 0) return null;
+
+  const total = rows.reduce((sum, row) => sum + row.value, 0);
+  if (total <= 0) return null;
+
+  return rows.slice(0, 3).reduce((sum, row) => sum + row.value, 0) / total;
 }
 
 export function calculateRanking(deputies: DeputyRecord[]): RankedDeputy[] {

@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "tsx --test src/**/*.test.ts",
+    "diagnose:read-path": "tsx scripts/measure-read-path.ts",
     "data:regex": "tsx scripts/apply-regex-supabase.ts",
     "data:classify": "tsx scripts/classify.ts",
     "data:supabase:ingest": "tsx scripts/supabase-ingest.ts"

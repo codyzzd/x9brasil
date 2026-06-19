@@ -89,6 +89,8 @@ const period: ProfilePeriodDetails = {
   ],
   largestExpenses: [],
   proposals: [],
+  campaignDonors: [],
+  campaignSuppliers: [],
   amendments: [
     {
       number: "1",

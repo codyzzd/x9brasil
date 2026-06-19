@@ -433,7 +433,13 @@ function ProposalSheet({
   )
 }
 
-export function ProposalsTable({ proposals }: { proposals: Proposal[] }) {
+export function ProposalsTable({
+  proposals,
+  controls = true,
+}: {
+  proposals: Proposal[]
+  controls?: boolean
+}) {
   const [selected, setSelected] = useState<Proposal | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
 
@@ -592,7 +598,7 @@ export function ProposalsTable({ proposals }: { proposals: Proposal[] }) {
         columns={columns}
         data={proposals}
         keyFn={(p, idx) => `${p.id}-${idx}`}
-        searchable
+        searchable={controls}
         searchPlaceholder="Buscar por ementa, tipo, número ou ano..."
         searchFields={[
           (p) => p.summary,
@@ -601,7 +607,7 @@ export function ProposalsTable({ proposals }: { proposals: Proposal[] }) {
           (p) => p.year,
           (p) => p.status,
         ]}
-        filters={filters}
+        filters={controls ? filters : []}
         emptyMessage="Nenhuma proposição encontrada no período."
         tableClassName="table-fixed"
       />

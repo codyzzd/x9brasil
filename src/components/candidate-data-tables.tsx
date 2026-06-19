@@ -725,7 +725,13 @@ export function LargestExpensesTable({ data }: { data: LargestExpense[] }) {
   )
 }
 
-export function PublicVotesTable({ data }: { data: PublicVote[] }) {
+export function PublicVotesTable({
+  data,
+  controls = true,
+}: {
+  data: PublicVote[]
+  controls?: boolean
+}) {
   const [selected, setSelected] = useState<PublicVote | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
 
@@ -900,7 +906,7 @@ export function PublicVotesTable({ data }: { data: PublicVote[] }) {
         columns={columns}
         data={data}
         keyFn={(vote, idx) => `${vote.voteId}-${vote.candidateVote}-${idx}`}
-        searchable
+        searchable={controls}
         searchPlaceholder="Buscar por descrição ou resumo..."
         searchFields={[
           (vote) => vote.description,
@@ -908,7 +914,7 @@ export function PublicVotesTable({ data }: { data: PublicVote[] }) {
           (vote) => vote.voteId,
           (vote) => vote.reason,
         ]}
-        filters={filters}
+        filters={controls ? filters : []}
         emptyMessage="Nenhuma votação nominal encontrada no período."
         tableClassName="table-fixed"
       />

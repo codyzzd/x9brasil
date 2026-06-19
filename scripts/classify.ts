@@ -1608,7 +1608,6 @@ async function updateLegislatorVotes(
         model_used: record.modelUsed,
         model_role: record.modelRole,
         confidence: record.confidence,
-        reason: record.reason,
         source: record.source,
         reviewed_manually: record.reviewedManually,
       }];

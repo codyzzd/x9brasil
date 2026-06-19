@@ -46,6 +46,7 @@ export type DataBannerStats = {
 };
 
 const SUPABASE_PAGE_SIZE = 1000;
+const SUPABASE_IN_FILTER_CHUNK_SIZE = 500;
 
 async function fetchAllRows<T>(
   query: (from: number, to: number) => PromiseLike<{
@@ -172,7 +173,7 @@ export async function getFullSnapshot(): Promise<RankingSnapshot> {
   cacheLife("hours");
   cacheTag("ranking");
 
-  const [metadata, deputies, periods, metrics, donors, campaignSuppliers] = await Promise.all([
+  const [metadata, deputies, periods, metrics] = await Promise.all([
     getSnapshotMetadata(),
     getDeputies(),
     getPeriods(),
@@ -180,21 +181,27 @@ export async function getFullSnapshot(): Promise<RankingSnapshot> {
       supabase.from("legislator_period_metrics").select("*").range(from, to),
       "legislator_period_metrics",
     ),
-    fetchAllRows<Record<string, unknown>>((from, to) =>
-      supabase
-        .from("legislator_period_top_donors")
-        .select("legislator_id, period_id, name, value")
-        .range(from, to),
-      "legislator_period_top_donors",
-    ),
-    fetchAllRows<Record<string, unknown>>((from, to) =>
-      supabase
-        .from("legislator_period_top_campaign_suppliers")
-        .select("legislator_id, period_id, name, value")
-        .range(from, to),
-      "legislator_period_top_campaign_suppliers",
-    ),
   ]);
+
+  const campaignIndicatorsMaterialized = hasCampaignFinanceMaterialization(metrics);
+  const [donors, campaignSuppliers] = campaignIndicatorsMaterialized
+    ? [[], []]
+    : await Promise.all([
+        fetchAllRows<Record<string, unknown>>((from, to) =>
+          supabase
+            .from("legislator_period_top_donors")
+            .select("legislator_id, period_id, name, value")
+            .range(from, to),
+          "legislator_period_top_donors",
+        ),
+        fetchAllRows<Record<string, unknown>>((from, to) =>
+          supabase
+            .from("legislator_period_top_campaign_suppliers")
+            .select("legislator_id, period_id, name, value")
+            .range(from, to),
+          "legislator_period_top_campaign_suppliers",
+        ),
+      ]);
 
   const donorsByPeriod = new Map<string, Array<{ name: string; value: number }>>();
   for (const d of donors) {
@@ -247,6 +254,10 @@ export async function getFullSnapshot(): Promise<RankingSnapshot> {
             totalCampaignReceipts: m.total_campaign_receipts as number | null,
             totalPublicReceipts: m.total_public_receipts as number | null,
             totalCampaignExpenses: m.total_campaign_expenses as number | null,
+            campaignDonorsCount: Number(m.campaign_donors_count ?? 0),
+            campaignDonorTop3Share: numericOrNull(m.campaign_donor_top3_share),
+            campaignSuppliersCount: Number(m.campaign_suppliers_count ?? 0),
+            campaignSupplierTop3Share: numericOrNull(m.campaign_supplier_top3_share),
             topDonors: donorsByPeriod.get(key) ?? [],
             topSuppliers: campaignSuppliersByPeriod.get(key) ?? [],
             publicContributionPoints: m.public_contribution_points as number | null,
@@ -276,6 +287,26 @@ export async function getFullSnapshot(): Promise<RankingSnapshot> {
     deputies,
     periods: periodRecords,
   };
+}
+
+function hasCampaignFinanceMaterialization(rows: Record<string, unknown>[]) {
+  if (rows.length === 0) return false;
+  return "campaign_donor_top3_share" in rows[0]
+    && "campaign_supplier_top3_share" in rows[0]
+    && "campaign_donors_count" in rows[0]
+    && "campaign_suppliers_count" in rows[0];
+}
+
+function numericOrNull(value: unknown) {
+  return value === null || value === undefined ? null : Number(value);
+}
+
+function chunks<T>(items: T[], size = SUPABASE_IN_FILTER_CHUNK_SIZE) {
+  const result: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    result.push(items.slice(index, index + size));
+  }
+  return result;
 }
 
 export async function getDeputies(): Promise<DeputyIdentity[]> {
@@ -404,29 +435,32 @@ export async function getPeriodMetrics(periodId: string): Promise<PeriodDeputyRe
   cacheTag("ranking");
   cacheTag(`period:${periodId}`);
 
-  const [metrics, donors, suppliers] = await Promise.all([
-    fetchAllRows<Record<string, unknown>>((from, to) => supabase
+  const metrics = await fetchAllRows<Record<string, unknown>>((from, to) => supabase
       .from("legislator_period_metrics")
       .select("*")
       .eq("period_id", periodId)
       .range(from, to),
       `legislator_period_metrics:${periodId}`,
-    ),
-    fetchAllRows<Record<string, unknown>>((from, to) => supabase
-      .from("legislator_period_top_donors")
-      .select("legislator_id, name, value")
-      .eq("period_id", periodId)
-      .range(from, to),
-      `legislator_period_top_donors:${periodId}`,
-    ),
-    fetchAllRows<Record<string, unknown>>((from, to) => supabase
-      .from("legislator_period_top_campaign_suppliers")
-      .select("legislator_id, name, value")
-      .eq("period_id", periodId)
-      .range(from, to),
-      `legislator_period_top_campaign_suppliers:${periodId}`,
-    ),
-  ]);
+  );
+
+  const [donors, suppliers] = hasCampaignFinanceMaterialization(metrics)
+    ? [[], []]
+    : await Promise.all([
+        fetchAllRows<Record<string, unknown>>((from, to) => supabase
+          .from("legislator_period_top_donors")
+          .select("legislator_id, name, value")
+          .eq("period_id", periodId)
+          .range(from, to),
+          `legislator_period_top_donors:${periodId}`,
+        ),
+        fetchAllRows<Record<string, unknown>>((from, to) => supabase
+          .from("legislator_period_top_campaign_suppliers")
+          .select("legislator_id, name, value")
+          .eq("period_id", periodId)
+          .range(from, to),
+          `legislator_period_top_campaign_suppliers:${periodId}`,
+        ),
+      ]);
 
   const donorsByDeputy = new Map<number, Array<{ name: string; value: number }>>();
   for (const d of donors) {
@@ -474,6 +508,10 @@ export async function getPeriodMetrics(periodId: string): Promise<PeriodDeputyRe
       totalCampaignReceipts: row.total_campaign_receipts as number | null,
       totalPublicReceipts: row.total_public_receipts as number | null,
       totalCampaignExpenses: row.total_campaign_expenses as number | null,
+      campaignDonorsCount: Number(row.campaign_donors_count ?? 0),
+      campaignDonorTop3Share: numericOrNull(row.campaign_donor_top3_share),
+      campaignSuppliersCount: Number(row.campaign_suppliers_count ?? 0),
+      campaignSupplierTop3Share: numericOrNull(row.campaign_supplier_top3_share),
       topDonors: donorsByDeputy.get(row.legislator_id as number) ?? [],
       topSuppliers: campaignSuppliersByDeputy.get(row.legislator_id as number) ?? [],
       publicContributionPoints: row.public_contribution_points as number | null,
@@ -573,22 +611,21 @@ export async function getProfileDetails(
 
   if (periodId === "legislature") {
     const periods = await getPeriods();
-    const annualPeriods = periods.filter((p) => p.id !== "legislature");
-    const [identity, ...allPeriodDetails] = await Promise.all([
+    const annualPeriodIds = periods
+      .filter((p) => p.id !== "legislature")
+      .map((p) => p.id);
+    const [identity, periodDetails] = await Promise.all([
       getProfileIdentity(legislatorId),
-      ...annualPeriods.map((p) =>
-        getProfilePeriodDetails(legislatorId, p.id),
-      ),
+      getProfileLegislatureDetails(legislatorId, annualPeriodIds),
     ]);
-    const validPeriods = allPeriodDetails.filter((p): p is ProfilePeriodDetails => p !== null);
 
-    if (validPeriods.length === 0) {
+    if (!periodDetails) {
       return { identity, period: null };
     }
 
     return {
       identity,
-      period: mergePeriods(legislatorId, validPeriods),
+      period: periodDetails,
     };
   }
 
@@ -597,6 +634,81 @@ export async function getProfileDetails(
     getProfilePeriodDetails(legislatorId, periodId),
   ]);
   return { identity, period: periodDetails };
+}
+
+export async function getProfileTables(
+  legislatorId: number,
+  periodId: string,
+) {
+  "use cache";
+  cacheLife("hours");
+  cacheTag("profile");
+  cacheTag(`profile:${legislatorId}:${periodId}:tables`);
+
+  const [proposals, publicVotes] = await Promise.all([
+    getProfileProposals(legislatorId, periodId),
+    getProfilePublicVotes(legislatorId, periodId),
+  ]);
+
+  return { proposals, publicVotes };
+}
+
+export async function getProfileProposals(
+  legislatorId: number,
+  periodId: string,
+) {
+  "use cache";
+  cacheLife("hours");
+  cacheTag("profile");
+  cacheTag(`profile:${legislatorId}:${periodId}:proposals`);
+
+  if (periodId === "legislature") {
+    const periods = await getPeriods();
+    const annualPeriodIds = periods
+      .filter((p) => p.id !== "legislature")
+      .map((p) => p.id);
+    return getDeputyProposalsForPeriods(legislatorId, annualPeriodIds);
+  }
+
+  return getDeputyProposals(legislatorId, periodId);
+}
+
+export async function getProfilePublicVotes(
+  legislatorId: number,
+  periodId: string,
+) {
+  "use cache";
+  cacheLife("hours");
+  cacheTag("profile");
+  cacheTag(`profile:${legislatorId}:${periodId}:votes`);
+
+  if (periodId === "legislature") {
+    const periods = await getPeriods();
+    const annualPeriodIds = periods
+      .filter((p) => p.id !== "legislature")
+      .map((p) => p.id);
+    return getDeputyVotesForPeriods(legislatorId, annualPeriodIds);
+  }
+
+  return getDeputyVotes(legislatorId, periodId);
+}
+
+export async function getProfilePublicVotesPage(
+  legislatorId: number,
+  periodId: string,
+  page: number,
+  pageSize: number,
+) {
+  "use cache";
+  cacheLife("hours");
+  cacheTag("profile");
+  cacheTag(`profile:${legislatorId}:${periodId}:votes-page:${page}:${pageSize}`);
+
+  const periodIds = periodId === "legislature"
+    ? (await getPeriods()).filter((p) => p.id !== "legislature").map((p) => p.id)
+    : [periodId];
+
+  return getDeputyVotesPageForPeriods(legislatorId, periodIds, periodId, page, pageSize);
 }
 
 async function getProfileIdentity(legislatorId: number): Promise<ProfileIdentityDetails> {
@@ -637,92 +749,20 @@ async function getProfileIdentity(legislatorId: number): Promise<ProfileIdentity
   };
 }
 
-function mergePeriods(
-  deputyId: number,
-  periods: ProfilePeriodDetails[],
-): ProfilePeriodDetails {
-  const categories = new Map<string, { total: number; documents: number }>();
-  const suppliers = new Map<
-    string,
-    { name: string; taxId: string | null; total: number; documents: number }
-  >();
-
-  for (const period of periods) {
-    for (const category of period.expenseCategories) {
-      const current = categories.get(category.name) || {
-        total: 0,
-        documents: 0,
-      };
-      current.total += category.total;
-      current.documents += category.documents;
-      categories.set(category.name, current);
-    }
-    for (const supplier of period.suppliers) {
-      const key = supplier.taxId || supplier.name;
-      const current = suppliers.get(key) || {
-        name: supplier.name,
-        taxId: supplier.taxId,
-        total: 0,
-        documents: 0,
-      };
-      current.total += supplier.total;
-      current.documents += supplier.documents;
-      suppliers.set(key, current);
-    }
-  }
-
-  return {
-    id: deputyId,
-    expenseCategories: [...categories.entries()]
-      .map(([name, values]) => ({ name, ...values }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 10),
-    suppliers: [...suppliers.values()]
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 10),
-    largestExpenses: periods
-      .flatMap((period) => period.largestExpenses)
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 10),
-    proposals: Array.from(
-      new Map(
-        periods
-          .flatMap((period) => period.proposals)
-          .map((proposal) => [proposal.id, proposal]),
-      ).values(),
-    ).sort((a, b) => b.date.localeCompare(a.date)),
-    publicVotes: periods
-      .flatMap((period) => period.publicVotes || [])
-      .sort(
-        (a, b) =>
-          Number(b.classification !== "unanalyzed") - Number(a.classification !== "unanalyzed") ||
-          Math.abs(b.scoreDelta) - Math.abs(a.scoreDelta) ||
-          b.date.localeCompare(a.date),
-      ),
-    amendments: periods
-      .flatMap((period) => period.amendments)
-      .sort(
-        (a, b) =>
-          b.transferredValue +
-          b.proposedValue -
-          (a.transferredValue + a.proposedValue),
-      )
-      .slice(0, 10),
-  };
-}
-
-async function getProfilePeriodDetails(
+async function getProfileLegislatureDetails(
   legislatorId: number,
-  periodId: string,
+  periodIds: string[],
 ): Promise<ProfilePeriodDetails | null> {
-  const [expenseCategories, suppliers, largestExpenses, proposals, votes, amendments] =
+  if (periodIds.length === 0) return null;
+
+  const [expenseCategories, suppliers, largestExpenses, amendments, campaignDonors, campaignSuppliers] =
     await Promise.all([
-      getExpenseCategories(legislatorId, periodId),
-      getSuppliers(legislatorId, periodId),
-      getLargestExpenses(legislatorId, periodId),
-      getDeputyProposals(legislatorId, periodId),
-      getDeputyVotes(legislatorId, periodId),
-      getAmendments(legislatorId, periodId),
+      getExpenseCategoriesForPeriods(legislatorId, periodIds),
+      getSuppliersForPeriods(legislatorId, periodIds),
+      getLargestExpensesForPeriods(legislatorId, periodIds),
+      getAmendmentsForPeriods(legislatorId, periodIds),
+      getCampaignDonorsForPeriods(legislatorId, periodIds),
+      getCampaignSuppliersForPeriods(legislatorId, periodIds),
     ]);
 
   return {
@@ -730,9 +770,38 @@ async function getProfilePeriodDetails(
     expenseCategories,
     suppliers,
     largestExpenses,
-    proposals,
-    publicVotes: votes,
+    proposals: [],
+    publicVotes: [],
     amendments,
+    campaignDonors,
+    campaignSuppliers,
+  };
+}
+
+async function getProfilePeriodDetails(
+  legislatorId: number,
+  periodId: string,
+): Promise<ProfilePeriodDetails | null> {
+  const [expenseCategories, suppliers, largestExpenses, amendments, campaignDonors, campaignSuppliers] =
+    await Promise.all([
+      getExpenseCategories(legislatorId, periodId),
+      getSuppliers(legislatorId, periodId),
+      getLargestExpenses(legislatorId, periodId),
+      getAmendments(legislatorId, periodId),
+      getCampaignDonors(legislatorId, periodId),
+      getCampaignSuppliers(legislatorId, periodId),
+    ]);
+
+  return {
+    id: legislatorId,
+    expenseCategories,
+    suppliers,
+    largestExpenses,
+    proposals: [],
+    publicVotes: [],
+    amendments,
+    campaignDonors,
+    campaignSuppliers,
   };
 }
 
@@ -748,6 +817,28 @@ async function getExpenseCategories(legislatorId: number, periodId: string) {
     total: Number(d.total),
     documents: d.documents as number,
   }));
+}
+
+async function getExpenseCategoriesForPeriods(legislatorId: number, periodIds: string[]) {
+  const { data } = await supabase
+    .from("legislator_period_expense_categories")
+    .select("name, total, documents")
+    .eq("legislator_id", legislatorId)
+    .in("period_id", periodIds);
+
+  const categories = new Map<string, { total: number; documents: number }>();
+  for (const row of data ?? []) {
+    const name = row.name as string;
+    const current = categories.get(name) ?? { total: 0, documents: 0 };
+    current.total += Number(row.total);
+    current.documents += row.documents as number;
+    categories.set(name, current);
+  }
+
+  return [...categories.entries()]
+    .map(([name, values]) => ({ name, ...values }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
 }
 
 async function getSuppliers(legislatorId: number, periodId: string) {
@@ -766,6 +857,37 @@ async function getSuppliers(legislatorId: number, periodId: string) {
   }));
 }
 
+async function getSuppliersForPeriods(legislatorId: number, periodIds: string[]) {
+  const { data } = await supabase
+    .from("legislator_period_suppliers")
+    .select("name, tax_id, total, documents")
+    .eq("legislator_id", legislatorId)
+    .in("period_id", periodIds);
+
+  const suppliers = new Map<
+    string,
+    { name: string; taxId: string | null; total: number; documents: number }
+  >();
+  for (const row of data ?? []) {
+    const name = row.name as string;
+    const taxId = row.tax_id as string | null;
+    const key = taxId || name;
+    const current = suppliers.get(key) ?? {
+      name,
+      taxId,
+      total: 0,
+      documents: 0,
+    };
+    current.total += Number(row.total);
+    current.documents += row.documents as number;
+    suppliers.set(key, current);
+  }
+
+  return [...suppliers.values()]
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
+}
+
 async function getLargestExpenses(legislatorId: number, periodId: string) {
   const { data } = await supabase
     .from("legislator_period_largest_expenses")
@@ -781,6 +903,85 @@ async function getLargestExpenses(legislatorId: number, periodId: string) {
     value: Number(d.value),
     documentUrl: d.document_url as string | null,
   }));
+}
+
+async function getLargestExpensesForPeriods(legislatorId: number, periodIds: string[]) {
+  const { data } = await supabase
+    .from("legislator_period_largest_expenses")
+    .select("category, supplier, expense_date, value, document_url")
+    .eq("legislator_id", legislatorId)
+    .in("period_id", periodIds)
+    .order("value", { ascending: false })
+    .limit(10);
+  return (data ?? []).map((d: Record<string, unknown>) => ({
+    category: d.category as string,
+    supplier: (d.supplier as string) ?? "",
+    date: (d.expense_date as string) ?? "",
+    value: Number(d.value),
+    documentUrl: d.document_url as string | null,
+  }));
+}
+
+async function getCampaignDonors(legislatorId: number, periodId: string) {
+  const { data } = await supabase
+    .from("legislator_period_top_donors")
+    .select("name, value")
+    .eq("legislator_id", legislatorId)
+    .eq("period_id", periodId)
+    .order("value", { ascending: false })
+    .limit(10);
+  return (data ?? []).map((d: Record<string, unknown>) => ({
+    name: d.name as string,
+    value: Number(d.value),
+  }));
+}
+
+async function getCampaignDonorsForPeriods(legislatorId: number, periodIds: string[]) {
+  const { data } = await supabase
+    .from("legislator_period_top_donors")
+    .select("name, value")
+    .eq("legislator_id", legislatorId)
+    .in("period_id", periodIds);
+
+  return aggregateCampaignRows(data ?? []);
+}
+
+async function getCampaignSuppliers(legislatorId: number, periodId: string) {
+  const { data } = await supabase
+    .from("legislator_period_top_campaign_suppliers")
+    .select("name, value")
+    .eq("legislator_id", legislatorId)
+    .eq("period_id", periodId)
+    .order("value", { ascending: false })
+    .limit(10);
+  return (data ?? []).map((d: Record<string, unknown>) => ({
+    name: d.name as string,
+    value: Number(d.value),
+  }));
+}
+
+async function getCampaignSuppliersForPeriods(legislatorId: number, periodIds: string[]) {
+  const { data } = await supabase
+    .from("legislator_period_top_campaign_suppliers")
+    .select("name, value")
+    .eq("legislator_id", legislatorId)
+    .in("period_id", periodIds);
+
+  return aggregateCampaignRows(data ?? []);
+}
+
+function aggregateCampaignRows(rows: Record<string, unknown>[]) {
+  const byName = new Map<string, { name: string; value: number }>();
+  for (const row of rows) {
+    const name = row.name as string;
+    const current = byName.get(name) ?? { name, value: 0 };
+    current.value += Number(row.value);
+    byName.set(name, current);
+  }
+
+  return [...byName.values()]
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 10);
 }
 
 async function getDeputyProposals(legislatorId: number, periodId: string) {
@@ -847,6 +1048,82 @@ async function getDeputyProposals(legislatorId: number, periodId: string) {
   });
 }
 
+async function getDeputyProposalsForPeriods(legislatorId: number, periodIds: string[]) {
+  const { data } = await supabase
+    .from("legislator_proposals")
+    .select("proposal_id, participation_role, participation_label, proposal_nature, proposal_nature_label, proposals(id, type, number, year, proposal_date, summary, status, url)")
+    .eq("legislator_id", legislatorId)
+    .in("period_id", periodIds);
+
+  if (!data) return [];
+
+  const proposalIds = Array.from(
+    new Set(data.map((row: Record<string, unknown>) => row.proposal_id as string).filter(Boolean)),
+  );
+  const reviewedClassifications: Record<string, unknown>[] = [];
+  for (const ids of chunks(proposalIds)) {
+    const { data: chunkRows, error } = await supabase
+      .from("proposal_classifications")
+      .select("proposal_id, category, confidence, justification, source, analysis_level, methodology_version, analysis_method_version, legislative_type, decision_nature, decision_scope, declared_benefit, hidden_cost, net_public_effect, has_tradeoff, summary_matches_text, risk_flags, critical_articles, analysis_payload")
+      .in("proposal_id", ids);
+    if (error) throw error;
+    reviewedClassifications.push(...(chunkRows ?? []));
+  }
+
+  const classMap = new Map(reviewedClassifications.map((c: Record<string, unknown>) => [c.proposal_id as string, c]));
+
+  return Array.from(
+    new Map(
+      data.map((row: Record<string, unknown>) => {
+        const proposal = row.proposals as Record<string, unknown> | null;
+        const summary = (proposal?.summary as string) ?? "";
+        const reviewedCls = classMap.get(row.proposal_id as string);
+        const classification: ProposalClassification | null = reviewedCls
+          ? {
+              category: reviewedCls.category as PublicValueCategory,
+              confidence: reviewedCls.confidence as ClassificationConfidence,
+              justification: reviewedCls.justification as string,
+              source: reviewedCls.source as "reviewed" | "rule" | "llm",
+              analysisLevel: (reviewedCls.analysis_level as 1 | 2 | 3 | null) ?? 2,
+              methodologyVersion: reviewedCls.methodology_version as string,
+              analysisMethodVersion: reviewedCls.analysis_method_version as string,
+              legislativeType: reviewedCls.legislative_type as ProposalClassification["legislativeType"],
+              decisionNature: reviewedCls.decision_nature as ProposalClassification["decisionNature"],
+              decisionScope: reviewedCls.decision_scope as ProposalClassification["decisionScope"],
+              declaredBenefit: reviewedCls.declared_benefit as string,
+              hiddenCost: reviewedCls.hidden_cost as string,
+              netPublicEffect: reviewedCls.net_public_effect as ProposalClassification["netPublicEffect"],
+              hasTradeoff: reviewedCls.has_tradeoff as boolean,
+              summaryMatchesText: reviewedCls.summary_matches_text as ProposalClassification["summaryMatchesText"],
+              riskFlags: (reviewedCls.risk_flags as RiskFlag[] | null) ?? [],
+              criticalArticles: (reviewedCls.critical_articles as CriticalArticle[] | null) ?? [],
+              analysisPayload: reviewedCls.analysis_payload as Record<string, unknown>,
+            }
+          : classifyProposal(row.proposal_id as string, summary);
+
+        return [
+          row.proposal_id as string,
+          {
+            id: row.proposal_id as string,
+            type: (proposal?.type as string) ?? "",
+            number: (proposal?.number as string) ?? "",
+            year: (proposal?.year as string) ?? "",
+            date: (proposal?.proposal_date as string) ?? "",
+            summary,
+            status: (proposal?.status as string) ?? "",
+            url: (proposal?.url as string) ?? "",
+            participationRole: row.participation_role as string,
+            participationLabel: row.participation_label as string,
+            proposalNature: row.proposal_nature as string,
+            proposalNatureLabel: row.proposal_nature_label as string,
+            ...(classification ? { publicValue: classifyProposalFull(row.proposal_id as string, summary, row.participation_role as ParticipationRole, row.proposal_nature as ProposalNature, classification) } : {}),
+          },
+        ];
+      }),
+    ).values(),
+  ).sort((a, b) => b.date.localeCompare(a.date));
+}
+
 function classifyProposalFull(proposalId: string, summary: string, _role: ParticipationRole, _nature: ProposalNature, classification?: ProposalClassification | null) {
   if (!classification) return null;
 
@@ -886,7 +1163,7 @@ function classifyProposalFull(proposalId: string, summary: string, _role: Partic
 async function getDeputyVotes(legislatorId: number, periodId: string) {
   const { data } = await supabase
     .from("legislator_votes")
-    .select("vote_id, candidate_vote, score_delta, score_points, affects_score, analysis_status, needs_strong_review, review_reason, coverage_category, score_safety_reason, model_used, model_role, confidence, reason, source, reviewed_manually, votes(id, vote_date, description, summary, url)")
+    .select("vote_id, candidate_vote, score_delta, score_points, affects_score, analysis_status, needs_strong_review, review_reason, coverage_category, score_safety_reason, model_used, model_role, confidence, source, reviewed_manually, votes(id, vote_date, description, summary, url)")
     .eq("legislator_id", legislatorId)
     .eq("period_id", periodId);
 
@@ -908,7 +1185,6 @@ async function getDeputyVotes(legislatorId: number, periodId: string) {
         : {}) as Record<string, unknown>;
       const hasLinkAnalysis =
         row.confidence !== null ||
-        Boolean(row.reason) ||
         Boolean(row.source) ||
         Boolean(row.reviewed_manually) ||
         Number(row.score_delta) !== 0;
@@ -930,7 +1206,7 @@ async function getDeputyVotes(legislatorId: number, periodId: string) {
         reviewReason: ((row.review_reason as string | null) ?? (cls?.review_reason as string | null)) ?? "",
         coverageCategory: ((row.coverage_category as string | null) ?? (cls?.coverage_category as string | null)) ?? "",
         confidence: row.confidence === null || row.confidence === undefined ? null : Number(row.confidence),
-        reason: (row.reason as string) ?? "",
+        reason: (cls?.reason as string) ?? "",
         source: (cls?.source as string) ?? (row.source as string) ?? "",
         analysisLevel: (cls?.analysis_level as 1 | 2 | 3 | null) ?? null,
         reviewedManually: ((cls?.reviewed_manually as boolean | null) ?? (row.reviewed_manually as boolean)) ?? false,
@@ -971,12 +1247,219 @@ async function getDeputyVotes(legislatorId: number, periodId: string) {
     );
 }
 
+async function getDeputyVotesForPeriods(legislatorId: number, periodIds: string[]) {
+  const { data } = await supabase
+    .from("legislator_votes")
+    .select("vote_id, candidate_vote, score_delta, score_points, affects_score, analysis_status, needs_strong_review, review_reason, coverage_category, score_safety_reason, model_used, model_role, confidence, source, reviewed_manually, votes(id, vote_date, description, summary, url)")
+    .eq("legislator_id", legislatorId)
+    .in("period_id", periodIds);
+
+  if (!data) return [];
+
+  const voteIds = Array.from(
+    new Set(data.map((r: Record<string, unknown>) => r.vote_id as string).filter(Boolean)),
+  );
+  const classifications: Record<string, unknown>[] = [];
+  for (const ids of chunks(voteIds)) {
+    const { data: chunkRows, error } = await supabase
+      .from("vote_classifications")
+      .select("vote_id, classification, severity, source, analysis_level, reviewed_manually, analysis_method_version, legislative_type, decision_nature, decision_scope, vote_object_type, vote_object_description, yes_means, no_means, analyzed_text_matches_vote_object, score_impact_limit, is_procedural_vote, declared_benefit, hidden_cost, net_public_effect, has_tradeoff, summary_matches_text, risk_flags, critical_articles, analysis_payload, model_used, model_role, analysis_status, risk_level, needs_strong_review, review_reason, coverage_category, affects_score, score_safety_reason")
+      .in("vote_id", ids);
+    if (error) throw error;
+    classifications.push(...(chunkRows ?? []));
+  }
+
+  return mapDeputyVotes(data, classifications);
+}
+
+async function getDeputyVotesPageForPeriods(
+  legislatorId: number,
+  periodIds: string[],
+  totalPeriodId: string,
+  page: number,
+  pageSize: number,
+) {
+  const rowsNeeded = (page + 1) * pageSize;
+  const [periodResults, total] = await Promise.all([
+    Promise.all(
+      periodIds.map(async (periodId) => {
+        const { data, error } = await supabase
+          .from("legislator_votes")
+          .select("id, vote_id, candidate_vote, score_delta, score_points, affects_score, analysis_status, needs_strong_review, review_reason, coverage_category, score_safety_reason, model_used, model_role, confidence, source, reviewed_manually, votes(id, vote_date, description, summary, url)")
+          .eq("legislator_id", legislatorId)
+          .eq("period_id", periodId)
+          .order("id", { ascending: false })
+          .range(0, rowsNeeded - 1);
+        if (error) throw error;
+        return data ?? [];
+      }),
+    ),
+    getNominalVotesTotal(legislatorId, totalPeriodId),
+  ]);
+
+  const data = periodResults
+    .flat()
+    .sort((a, b) => Number((b as Record<string, unknown>).id ?? 0) - Number((a as Record<string, unknown>).id ?? 0))
+    .slice(page * pageSize, (page + 1) * pageSize);
+
+  if (data.length === 0) {
+    return { rows: [], total, page, pageSize };
+  }
+
+  const voteIds = Array.from(
+    new Set(data.map((r: Record<string, unknown>) => r.vote_id as string).filter(Boolean)),
+  );
+  const classifications: Record<string, unknown>[] = [];
+  for (const ids of chunks(voteIds)) {
+    const { data: chunkRows, error: classificationError } = await supabase
+      .from("vote_classifications")
+      .select("vote_id, classification, severity, source, analysis_level, reviewed_manually, analysis_method_version, legislative_type, decision_nature, decision_scope, vote_object_type, vote_object_description, yes_means, no_means, analyzed_text_matches_vote_object, score_impact_limit, is_procedural_vote, declared_benefit, hidden_cost, net_public_effect, has_tradeoff, summary_matches_text, risk_flags, critical_articles, analysis_payload, model_used, model_role, analysis_status, risk_level, needs_strong_review, review_reason, coverage_category, affects_score, score_safety_reason")
+      .in("vote_id", ids);
+    if (classificationError) throw classificationError;
+    classifications.push(...(chunkRows ?? []));
+  }
+
+  return {
+    rows: mapDeputyVotes(data, classifications),
+    total,
+    page,
+    pageSize,
+  };
+}
+
+async function getNominalVotesTotal(legislatorId: number, periodId: string) {
+  const { data, error } = await supabase
+    .from("legislator_period_metrics")
+    .select("nominal_votes")
+    .eq("legislator_id", legislatorId)
+    .eq("period_id", periodId)
+    .single();
+
+  if (error) return 0;
+  return Number((data as Record<string, unknown> | null)?.nominal_votes ?? 0);
+}
+
+function mapDeputyVotes(
+  rows: Record<string, unknown>[],
+  classifications: Record<string, unknown>[],
+) {
+  const classMap = new Map(classifications.map((c: Record<string, unknown>) => [c.vote_id as string, c]));
+
+  return rows
+    .map((row: Record<string, unknown>) => {
+      const vote = row.votes as Record<string, unknown> | null;
+      const cls = classMap.get(row.vote_id as string) as Record<string, unknown> | undefined;
+      const payload = (cls?.analysis_payload && typeof cls.analysis_payload === "object"
+        ? cls.analysis_payload
+        : {}) as Record<string, unknown>;
+      const hasLinkAnalysis =
+        row.confidence !== null ||
+        Boolean(row.source) ||
+        Boolean(row.reviewed_manually) ||
+        Number(row.score_delta) !== 0;
+      const scoreSafetyReason = ((row.score_safety_reason as string | null) ?? (cls?.score_safety_reason as string | null) ?? (payload.scoreSafetyReason as string)) ?? "";
+      const modelUsed = ((row.model_used as string | null) ?? (cls?.model_used as string | null) ?? (payload.modelUsed as string)) ?? "";
+      const modelRole = ((row.model_role as string | null) ?? (cls?.model_role as string | null) ?? (payload.modelRole as string)) ?? "";
+      const riskFlags = (cls?.risk_flags as string[] | null) ?? [];
+      const criticalArticles = (cls?.critical_articles as Array<{ article: string; issue: string }> | null) ?? [];
+      const analysisMethodVersion = cls?.analysis_method_version as string | null | undefined;
+      const legislativeType = cls?.legislative_type as string | null | undefined;
+      const decisionNature = cls?.decision_nature as string | null | undefined;
+      const decisionScope = cls?.decision_scope as string | null | undefined;
+      const voteObjectType = cls?.vote_object_type as string | null | undefined;
+      const voteObjectDescription = cls?.vote_object_description as string | null | undefined;
+      const yesMeans = cls?.yes_means as string | null | undefined;
+      const noMeans = cls?.no_means as string | null | undefined;
+      const analyzedTextMatchesVoteObject = cls?.analyzed_text_matches_vote_object as string | null | undefined;
+      const scoreImpactLimit = cls?.score_impact_limit as string | null | undefined;
+      const declaredBenefit = cls?.declared_benefit as string | null | undefined;
+      const hiddenCost = cls?.hidden_cost as string | null | undefined;
+      const netPublicEffect = cls?.net_public_effect as string | null | undefined;
+      const summaryMatchesText = cls?.summary_matches_text as string | null | undefined;
+
+      return {
+        voteId: row.vote_id as string,
+        date: (vote?.vote_date as string) ?? "",
+        description: (vote?.description as string) ?? "",
+        summary: (vote?.summary as string) ?? "",
+        url: (vote?.url as string) ?? "",
+        candidateVote: row.candidate_vote as string,
+        classification: (cls?.classification as string) ?? (hasLinkAnalysis ? "analyzed" : "unanalyzed"),
+        severity: (cls?.severity as string) ?? "",
+        scoreDelta: Number(row.score_delta),
+        scorePoints: row.score_points === null || row.score_points === undefined ? null : Number(row.score_points),
+        affectsScore: ((row.affects_score as boolean | null) ?? (cls?.affects_score as boolean | null)) ?? false,
+        analysisStatus: ((row.analysis_status as string | null) ?? (cls?.analysis_status as string | null)) ?? "",
+        riskLevel: (cls?.risk_level as string) ?? "",
+        needsStrongReview: ((row.needs_strong_review as boolean | null) ?? (cls?.needs_strong_review as boolean | null)) ?? false,
+        reviewReason: ((row.review_reason as string | null) ?? (cls?.review_reason as string | null)) ?? "",
+        coverageCategory: ((row.coverage_category as string | null) ?? (cls?.coverage_category as string | null)) ?? "",
+        confidence: row.confidence === null || row.confidence === undefined ? null : Number(row.confidence),
+        reason: (cls?.reason as string) ?? "",
+        source: (cls?.source as string) ?? (row.source as string) ?? "",
+        analysisLevel: (cls?.analysis_level as 1 | 2 | 3 | null) ?? null,
+        reviewedManually: ((cls?.reviewed_manually as boolean | null) ?? (row.reviewed_manually as boolean)) ?? false,
+        ...(analysisMethodVersion ? { analysisMethodVersion } : {}),
+        ...(legislativeType ? { legislativeType } : {}),
+        ...(decisionNature ? { decisionNature } : {}),
+        ...(decisionScope ? { decisionScope } : {}),
+        ...(voteObjectType ? { voteObjectType } : {}),
+        ...((payload.voteObjectSubtype as string | undefined) ? { voteObjectSubtype: payload.voteObjectSubtype as string } : {}),
+        ...(voteObjectDescription ? { voteObjectDescription } : {}),
+        ...(yesMeans ? { yesMeans } : {}),
+        ...(noMeans ? { noMeans } : {}),
+        ...(typeof payload.voteObjectTextFound === "boolean" ? { voteObjectTextFound: payload.voteObjectTextFound as boolean } : {}),
+        ...((payload.primaryTextUsed as string | undefined) ? { primaryTextUsed: payload.primaryTextUsed as string } : {}),
+        ...(typeof payload.usedRelatedBillAsMainEvidence === "boolean" ? { usedRelatedBillAsMainEvidence: payload.usedRelatedBillAsMainEvidence as boolean } : {}),
+        ...(analyzedTextMatchesVoteObject ? { analyzedTextMatchesVoteObject } : {}),
+        ...(scoreImpactLimit ? { scoreImpactLimit } : {}),
+        ...(typeof payload.recommendedScoreImpact === "number" ? { recommendedScoreImpact: payload.recommendedScoreImpact } : {}),
+        ...(scoreSafetyReason ? { scoreSafetyReason } : {}),
+        ...((payload.modelRecommendation as string | undefined) ? { modelRecommendation: payload.modelRecommendation as string } : {}),
+        ...(modelUsed ? { modelUsed } : {}),
+        ...(modelRole ? { modelRole } : {}),
+        ...(typeof cls?.is_procedural_vote === "boolean" ? { isProceduralVote: cls.is_procedural_vote as boolean } : {}),
+        ...(declaredBenefit ? { declaredBenefit } : {}),
+        ...(hiddenCost ? { hiddenCost } : {}),
+        ...(netPublicEffect ? { netPublicEffect } : {}),
+        ...(typeof cls?.has_tradeoff === "boolean" ? { hasTradeoff: cls.has_tradeoff as boolean } : {}),
+        ...(summaryMatchesText ? { summaryMatchesText } : {}),
+        ...(riskFlags.length > 0 ? { riskFlags } : {}),
+        ...(criticalArticles.length > 0 ? { criticalArticles } : {}),
+      };
+    })
+    .sort(
+      (a, b) =>
+        Number(b.classification !== "unanalyzed") - Number(a.classification !== "unanalyzed") ||
+        Math.abs(b.scoreDelta) - Math.abs(a.scoreDelta) ||
+        b.date.localeCompare(a.date),
+    );
+}
+
 async function getAmendments(legislatorId: number, periodId: string) {
   const { data } = await supabase
     .from("legislator_amendments")
     .select("number, year, type, beneficiary, proposed_value, transferred_value")
     .eq("legislator_id", legislatorId)
     .eq("period_id", periodId)
+    .order("transferred_value", { ascending: false })
+    .limit(10);
+  return (data ?? []).map((d: Record<string, unknown>) => ({
+    number: (d.number as string) ?? "",
+    year: (d.year as string) ?? "",
+    type: (d.type as string) ?? "",
+    beneficiary: (d.beneficiary as string) ?? "",
+    proposedValue: Number(d.proposed_value ?? 0),
+    transferredValue: Number(d.transferred_value ?? 0),
+  }));
+}
+
+async function getAmendmentsForPeriods(legislatorId: number, periodIds: string[]) {
+  const { data } = await supabase
+    .from("legislator_amendments")
+    .select("number, year, type, beneficiary, proposed_value, transferred_value")
+    .eq("legislator_id", legislatorId)
+    .in("period_id", periodIds)
     .order("transferred_value", { ascending: false })
     .limit(10);
   return (data ?? []).map((d: Record<string, unknown>) => ({
