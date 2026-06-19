@@ -66,6 +66,17 @@ type Proposal = {
     natureWeight: number
     progressBonus: number
     scoreExplanation: string
+    analysisMethodVersion?: string
+    legislativeType?: string
+    decisionNature?: string
+    decisionScope?: string
+    declaredBenefit?: string
+    hiddenCost?: string
+    netPublicEffect?: string
+    hasTradeoff?: boolean
+    summaryMatchesText?: string
+    riskFlags?: string[]
+    criticalArticles?: Array<{ article: string; issue: string }>
   } | null
 }
 
@@ -139,6 +150,18 @@ function labelStyle(label: string) {
     return "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400"
   }
   return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400"
+}
+
+function netPublicEffectLabel(value: string) {
+  if (value === "positive") return "positivo"
+  if (value === "negative") return "negativo"
+  if (value === "mixed") return "misto"
+  if (value === "unclear") return "incerto"
+  return "-"
+}
+
+function riskFlagLabel(value: string) {
+  return value.replaceAll("_", " ")
 }
 
 function pickFilter(
@@ -273,6 +296,48 @@ function ProposalSheet({
                   {pv.justification || "Esta proposição ainda não tem justificativa detalhada registrada."}
                 </p>
               </section>
+
+              {(pv.analysisMethodVersion || pv.netPublicEffect || pv.declaredBenefit || pv.hiddenCost) && (
+                <section>
+                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                    Auditoria N3
+                  </h4>
+                  <dl className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tipo</dt>
+                      <dd>{pv.legislativeType || proposal.type || "-"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Efeito líquido</dt>
+                      <dd>{netPublicEffectLabel(pv.netPublicEffect || "")}</dd>
+                    </div>
+                  </dl>
+                  {(pv.declaredBenefit || pv.hiddenCost) && (
+                    <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                      {pv.declaredBenefit && <p><span className="font-medium text-foreground">Benefício declarado:</span> {pv.declaredBenefit}</p>}
+                      {pv.hiddenCost && <p><span className="font-medium text-foreground">Custo escondido:</span> {pv.hiddenCost}</p>}
+                    </div>
+                  )}
+                  {pv.riskFlags && pv.riskFlags.filter((flag) => flag !== "none").length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {pv.riskFlags.filter((flag) => flag !== "none").map((flag) => (
+                        <Badge key={flag} variant="outline" className="text-[11px]">
+                          {riskFlagLabel(flag)}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  {pv.criticalArticles && pv.criticalArticles.length > 0 && (
+                    <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
+                      {pv.criticalArticles.map((item, index) => (
+                        <li key={`${item.article}-${index}`}>
+                          <span className="font-medium text-foreground">{item.article}:</span> {item.issue}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              )}
 
               <section>
                 <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">

@@ -5,6 +5,8 @@ import { PDFParse } from "pdf-parse";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CACHE_DIR = join(__dirname, ".llm-cache", "proposicoes");
+const propositionIdCache = new Map<string, Promise<number | null>>();
+const fullTextCache = new Map<number, Promise<FullTextResult>>();
 
 export interface FullTextResult {
   text: string;
@@ -66,7 +68,7 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
 
-export async function getPropositionId(voteId: string): Promise<number | null> {
+async function fetchPropositionId(voteId: string): Promise<number | null> {
   const url = `https://dadosabertos.camara.leg.br/api/v2/votacoes/${voteId}`;
   try {
     const res = await fetch(url);
@@ -78,6 +80,14 @@ export async function getPropositionId(voteId: string): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+export async function getPropositionId(voteId: string): Promise<number | null> {
+  const cached = propositionIdCache.get(voteId);
+  if (cached) return cached;
+  const promise = fetchPropositionId(voteId);
+  propositionIdCache.set(voteId, promise);
+  return promise;
 }
 
 async function fetchFullText(proposicaoId: number): Promise<FullTextResult> {
@@ -145,13 +155,18 @@ async function fetchFullText(proposicaoId: number): Promise<FullTextResult> {
 export async function getFullTextForVote(voteId: string): Promise<FullTextResult | null> {
   const propId = await getPropositionId(voteId);
   if (!propId) return null;
-  return fetchFullText(propId);
+  return getFullTextForProposal(propId);
 }
 
 export async function getFullTextForProposal(proposicaoId: number): Promise<FullTextResult | null> {
   try {
-    return await fetchFullText(proposicaoId);
+    const cached = fullTextCache.get(proposicaoId);
+    if (cached) return await cached;
+    const promise = fetchFullText(proposicaoId);
+    fullTextCache.set(proposicaoId, promise);
+    return await promise;
   } catch {
+    fullTextCache.delete(proposicaoId);
     return null;
   }
 }

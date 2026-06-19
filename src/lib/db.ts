@@ -22,6 +22,8 @@ import {
   type ProposalClassification,
   type PublicValueCategory,
   type ClassificationConfidence,
+  type CriticalArticle,
+  type RiskFlag,
 } from "@/lib/public-value";
 
 export type SnapshotMetadata = {
@@ -778,7 +780,7 @@ async function getDeputyProposals(legislatorId: number, periodId: string) {
   const { data: reviewedClassifications } = proposalIds.length > 0
     ? await supabase
         .from("proposal_classifications")
-        .select("proposal_id, category, confidence, justification, source, analysis_level, methodology_version")
+        .select("proposal_id, category, confidence, justification, source, analysis_level, methodology_version, analysis_method_version, legislative_type, decision_nature, decision_scope, declared_benefit, hidden_cost, net_public_effect, has_tradeoff, summary_matches_text, risk_flags, critical_articles, analysis_payload")
         .in("proposal_id", proposalIds)
     : { data: [] as Record<string, unknown>[] | null };
 
@@ -796,6 +798,18 @@ async function getDeputyProposals(legislatorId: number, periodId: string) {
           source: reviewedCls.source as "reviewed" | "rule" | "llm",
           analysisLevel: (reviewedCls.analysis_level as 1 | 2 | 3 | null) ?? 2,
           methodologyVersion: reviewedCls.methodology_version as string,
+          analysisMethodVersion: reviewedCls.analysis_method_version as string,
+          legislativeType: reviewedCls.legislative_type as ProposalClassification["legislativeType"],
+          decisionNature: reviewedCls.decision_nature as ProposalClassification["decisionNature"],
+          decisionScope: reviewedCls.decision_scope as ProposalClassification["decisionScope"],
+          declaredBenefit: reviewedCls.declared_benefit as string,
+          hiddenCost: reviewedCls.hidden_cost as string,
+          netPublicEffect: reviewedCls.net_public_effect as ProposalClassification["netPublicEffect"],
+          hasTradeoff: reviewedCls.has_tradeoff as boolean,
+          summaryMatchesText: reviewedCls.summary_matches_text as ProposalClassification["summaryMatchesText"],
+          riskFlags: (reviewedCls.risk_flags as RiskFlag[] | null) ?? [],
+          criticalArticles: (reviewedCls.critical_articles as CriticalArticle[] | null) ?? [],
+          analysisPayload: reviewedCls.analysis_payload as Record<string, unknown>,
         }
       : classifyProposal(row.proposal_id as string, summary);
 
@@ -835,6 +849,17 @@ function classifyProposalFull(proposalId: string, summary: string, _role: Partic
     stageMultiplier: 0.25,
     points: catInfo.weight * 0.25,
     methodologyVersion: classification.methodologyVersion,
+    analysisMethodVersion: classification.analysisMethodVersion,
+    legislativeType: classification.legislativeType,
+    decisionNature: classification.decisionNature,
+    decisionScope: classification.decisionScope,
+    declaredBenefit: classification.declaredBenefit,
+    hiddenCost: classification.hiddenCost,
+    netPublicEffect: classification.netPublicEffect,
+    hasTradeoff: classification.hasTradeoff,
+    summaryMatchesText: classification.summaryMatchesText,
+    riskFlags: classification.riskFlags ?? [],
+    criticalArticles: classification.criticalArticles ?? [],
     roleWeight: 1.0,
     natureWeight: 1.0,
     progressBonus: 0,
@@ -853,7 +878,7 @@ async function getDeputyVotes(legislatorId: number, periodId: string) {
 
   const { data: classifications } = await supabase
     .from("vote_classifications")
-    .select("vote_id, classification, severity, source, analysis_level, reviewed_manually")
+    .select("vote_id, classification, severity, source, analysis_level, reviewed_manually, analysis_method_version, legislative_type, decision_nature, decision_scope, vote_object_type, vote_object_description, yes_means, no_means, analyzed_text_matches_vote_object, score_impact_limit, is_procedural_vote, declared_benefit, hidden_cost, net_public_effect, has_tradeoff, summary_matches_text, risk_flags, critical_articles")
     .in("vote_id", data.map((r: Record<string, unknown>) => r.vote_id));
 
   const classMap = new Map((classifications ?? []).map((c: Record<string, unknown>) => [c.vote_id as string, c]));
@@ -883,6 +908,24 @@ async function getDeputyVotes(legislatorId: number, periodId: string) {
         source: (cls?.source as string) ?? (row.source as string) ?? "",
         analysisLevel: (cls?.analysis_level as 1 | 2 | 3 | null) ?? null,
         reviewedManually: ((cls?.reviewed_manually as boolean | null) ?? (row.reviewed_manually as boolean)) ?? false,
+        analysisMethodVersion: (cls?.analysis_method_version as string) ?? "",
+        legislativeType: (cls?.legislative_type as string) ?? "",
+        decisionNature: (cls?.decision_nature as string) ?? "",
+        decisionScope: (cls?.decision_scope as string) ?? "",
+        voteObjectType: (cls?.vote_object_type as string) ?? "",
+        voteObjectDescription: (cls?.vote_object_description as string) ?? "",
+        yesMeans: (cls?.yes_means as string) ?? "",
+        noMeans: (cls?.no_means as string) ?? "",
+        analyzedTextMatchesVoteObject: (cls?.analyzed_text_matches_vote_object as string) ?? "",
+        scoreImpactLimit: (cls?.score_impact_limit as string) ?? "",
+        isProceduralVote: (cls?.is_procedural_vote as boolean | null) ?? false,
+        declaredBenefit: (cls?.declared_benefit as string) ?? "",
+        hiddenCost: (cls?.hidden_cost as string) ?? "",
+        netPublicEffect: (cls?.net_public_effect as string) ?? "",
+        hasTradeoff: (cls?.has_tradeoff as boolean | null) ?? false,
+        summaryMatchesText: (cls?.summary_matches_text as string) ?? "",
+        riskFlags: (cls?.risk_flags as string[] | null) ?? [],
+        criticalArticles: (cls?.critical_articles as Array<{ article: string; issue: string }> | null) ?? [],
       };
     })
     .sort(

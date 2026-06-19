@@ -242,8 +242,8 @@ function PublicValueSection({
             <AnalysisLevel
               icon={Layers}
               label="N3"
-              title="Teor integral"
-              text="Em teste. Usa o texto completo quando disponível e tem prioridade sobre análises mais rasas."
+              title="Auditoria profunda"
+              text="Em teste. Usa inteiro teor quando disponível, identifica o objeto real da votação, efeito líquido, riscos e limites de impacto no score."
             />
           </div>
           <p>
@@ -252,6 +252,12 @@ function PublicValueSection({
             quando novos syncs ou reprocessamentos rodam. Itens pendentes não
             recebem nota zero; eles simplesmente ficam fora das partes do
             cálculo que dependem de classificação.
+          </p>
+          <p>
+            No N3, votações sobre emenda, destaque, substitutivo ou procedimento
+            recebem travas adicionais: se o sistema não consegue confirmar o
+            objeto exato votado ou se o texto analisado não corresponde a esse
+            objeto, o impacto no score é zerado ou limitado.
           </p>
         </div>
       </div>

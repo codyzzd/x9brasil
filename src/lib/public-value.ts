@@ -101,6 +101,91 @@ export type PublicVoteClassification =
 export type PublicVoteSeverity = "low" | "medium" | "high" | "critical";
 export type CandidateVote = "yes" | "no" | "abstain" | "absent";
 export type PublicInterestVote = "yes" | "no" | "any" | "none";
+export type LegislativeType =
+  | "PL"
+  | "PLP"
+  | "PEC"
+  | "PDL"
+  | "PRC"
+  | "MPV"
+  | "RIC"
+  | "PFC"
+  | "REQ"
+  | "EMP"
+  | "SBT"
+  | "DTQ"
+  | "VTS"
+  | "RCP"
+  | "MSC"
+  | "INC"
+  | "OUTRO"
+  | "INCERTO";
+export type VoteObjectType =
+  | "main_bill"
+  | "amendment"
+  | "substitute"
+  | "highlight"
+  | "urgency"
+  | "procedural_request"
+  | "postponement"
+  | "agenda_withdrawal"
+  | "appeal"
+  | "other"
+  | "unclear";
+export type DecisionNature =
+  | "substantive_policy"
+  | "constitutional_change"
+  | "fiscal_budgetary"
+  | "oversight_control"
+  | "information_request"
+  | "criminal_penalty"
+  | "rights_expansion"
+  | "rights_restriction"
+  | "institutional_rule"
+  | "symbolic"
+  | "commemorative"
+  | "procedural"
+  | "unclear";
+export type DecisionScope =
+  | "national_policy"
+  | "constitutional_rule"
+  | "fiscal_effect"
+  | "criminal_law"
+  | "administrative_control"
+  | "congressional_procedure"
+  | "oversight"
+  | "symbolic_only"
+  | "local_or_specific"
+  | "unclear";
+export type NetPublicEffect = "positive" | "negative" | "mixed" | "unclear";
+export type SummaryMatchesText = "true" | "false" | "unclear";
+export type ScoreImpactLimit = "none" | "low" | "medium" | "high" | "critical";
+export type RiskFlag =
+  | "benefit_offset_by_hidden_cost"
+  | "hidden_revocation"
+  | "scope_mismatch"
+  | "unrelated_amendment"
+  | "jabuti"
+  | "privilege_or_benefit"
+  | "corporate_or_category_benefit"
+  | "economic_group_benefit"
+  | "fiscal_impact"
+  | "transparency_reduction"
+  | "oversight_reduction"
+  | "constitutional_risk"
+  | "increased_workload"
+  | "increased_cost_or_tax"
+  | "increased_bureaucracy"
+  | "reduced_rights"
+  | "procedural_only"
+  | "vote_object_unclear"
+  | "text_does_not_match_vote_object"
+  | "insufficient_text"
+  | "none";
+export type CriticalArticle = {
+  article: string;
+  issue: string;
+};
 
 export type ProposalClassification = {
   category: PublicValueCategory;
@@ -109,10 +194,22 @@ export type ProposalClassification = {
   source: ClassificationSource;
   analysisLevel: 1 | 2 | 3;
   methodologyVersion: string;
+  analysisMethodVersion?: string;
+  legislativeType?: LegislativeType;
+  decisionNature?: DecisionNature;
+  decisionScope?: DecisionScope;
+  declaredBenefit?: string;
+  hiddenCost?: string;
+  netPublicEffect?: NetPublicEffect;
+  hasTradeoff?: boolean;
+  summaryMatchesText?: SummaryMatchesText;
+  riskFlags?: RiskFlag[];
+  criticalArticles?: CriticalArticle[];
+  analysisPayload?: Record<string, unknown>;
 };
 
-export const METHODOLOGY_VERSION = "2026-06-15";
-export const METHODOLOGY_REVIEWED_AT = "2026-06-15";
+export const METHODOLOGY_VERSION = "legislative-impact-v2";
+export const METHODOLOGY_REVIEWED_AT = "2026-06-19";
 
 export type PublicVoteAnalysis = {
   voteId: string;
@@ -120,11 +217,30 @@ export type PublicVoteAnalysis = {
   severity: PublicVoteSeverity;
   publicInterestVote: PublicInterestVote;
   confidence: number;
+  isProceduralVote?: boolean;
+  legislativeType?: LegislativeType;
+  decisionNature?: DecisionNature;
+  decisionScope?: DecisionScope;
+  voteObjectType?: VoteObjectType;
+  voteObjectDescription?: string;
+  yesMeans?: string;
+  noMeans?: string;
+  analyzedTextMatchesVoteObject?: SummaryMatchesText;
+  scoreImpactLimit?: ScoreImpactLimit;
+  declaredBenefit?: string;
+  hiddenCost?: string;
+  netPublicEffect?: NetPublicEffect;
+  hasTradeoff?: boolean;
+  summaryMatchesText?: SummaryMatchesText;
+  riskFlags?: RiskFlag[];
+  criticalArticles?: CriticalArticle[];
   reason: string;
   source: ClassificationSource;
   analysisLevel: 1 | 2 | 3;
   reviewedManually: boolean;
   methodologyVersion: string;
+  analysisMethodVersion?: string;
+  analysisPayload?: Record<string, unknown>;
 };
 
 export type PublicVoteRecord = {
@@ -140,7 +256,103 @@ export type PublicVoteRecord = {
   reviewedManually: boolean;
 };
 
-export const VOTE_METHODOLOGY_VERSION = "2026-06-15-votes";
+export const VOTE_METHODOLOGY_VERSION = "legislative-impact-v2";
+
+const PUBLIC_VOTE_CLASSIFICATIONS = [
+  "positive_public_interest",
+  "neutral",
+  "low_relevance",
+  "negative_public_interest",
+  "harmful_or_self_serving",
+] as const satisfies readonly PublicVoteClassification[];
+const PUBLIC_VOTE_SEVERITIES = ["low", "medium", "high", "critical"] as const satisfies readonly PublicVoteSeverity[];
+const PUBLIC_INTEREST_VOTES = ["yes", "no", "any", "none"] as const satisfies readonly PublicInterestVote[];
+const LEGISLATIVE_TYPES = [
+  "PL",
+  "PLP",
+  "PEC",
+  "PDL",
+  "PRC",
+  "MPV",
+  "RIC",
+  "PFC",
+  "REQ",
+  "EMP",
+  "SBT",
+  "DTQ",
+  "VTS",
+  "RCP",
+  "MSC",
+  "INC",
+  "OUTRO",
+  "INCERTO",
+] as const satisfies readonly LegislativeType[];
+const VOTE_OBJECT_TYPES = [
+  "main_bill",
+  "amendment",
+  "substitute",
+  "highlight",
+  "urgency",
+  "procedural_request",
+  "postponement",
+  "agenda_withdrawal",
+  "appeal",
+  "other",
+  "unclear",
+] as const satisfies readonly VoteObjectType[];
+const DECISION_NATURES = [
+  "substantive_policy",
+  "constitutional_change",
+  "fiscal_budgetary",
+  "oversight_control",
+  "information_request",
+  "criminal_penalty",
+  "rights_expansion",
+  "rights_restriction",
+  "institutional_rule",
+  "symbolic",
+  "commemorative",
+  "procedural",
+  "unclear",
+] as const satisfies readonly DecisionNature[];
+const DECISION_SCOPES = [
+  "national_policy",
+  "constitutional_rule",
+  "fiscal_effect",
+  "criminal_law",
+  "administrative_control",
+  "congressional_procedure",
+  "oversight",
+  "symbolic_only",
+  "local_or_specific",
+  "unclear",
+] as const satisfies readonly DecisionScope[];
+const NET_PUBLIC_EFFECTS = ["positive", "negative", "mixed", "unclear"] as const satisfies readonly NetPublicEffect[];
+const SUMMARY_MATCHES_TEXT = ["true", "false", "unclear"] as const satisfies readonly SummaryMatchesText[];
+const SCORE_IMPACT_LIMITS = ["none", "low", "medium", "high", "critical"] as const satisfies readonly ScoreImpactLimit[];
+const RISK_FLAGS = [
+  "benefit_offset_by_hidden_cost",
+  "hidden_revocation",
+  "scope_mismatch",
+  "unrelated_amendment",
+  "jabuti",
+  "privilege_or_benefit",
+  "corporate_or_category_benefit",
+  "economic_group_benefit",
+  "fiscal_impact",
+  "transparency_reduction",
+  "oversight_reduction",
+  "constitutional_risk",
+  "increased_workload",
+  "increased_cost_or_tax",
+  "increased_bureaucracy",
+  "reduced_rights",
+  "procedural_only",
+  "vote_object_unclear",
+  "text_does_not_match_vote_object",
+  "insufficient_text",
+  "none",
+] as const satisfies readonly RiskFlag[];
 
 const rules: Array<{
   category: PublicValueCategory;
@@ -244,6 +456,125 @@ export function normalizePublicVote(value: string | null | undefined): Candidate
     return "abstain";
   }
   return "abstain";
+}
+
+function enumValue<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value) ? value as T : fallback;
+}
+
+function textValue(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function booleanValue(value: unknown, fallback = false) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function normalizeRiskFlags(value: unknown): RiskFlag[] {
+  if (!Array.isArray(value)) return ["none"];
+  const flags = value.filter((flag): flag is RiskFlag =>
+    typeof flag === "string" && (RISK_FLAGS as readonly string[]).includes(flag),
+  );
+  return flags.length > 0 ? flags : ["none"];
+}
+
+function normalizeCriticalArticles(value: unknown): CriticalArticle[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    const article = textValue(record.article).trim();
+    const issue = textValue(record.issue).trim();
+    if (!article || !issue) return [];
+    return [{ article, issue }];
+  });
+}
+
+export function inferLegislativeType(value: string | null | undefined): LegislativeType {
+  const normalized = normalizeProposalText(value || "").toUpperCase();
+  if (/\bPLP\b|PROJETO DE LEI COMPLEMENTAR/.test(normalized)) return "PLP";
+  if (/\bPEC\b|PROPOSTA DE EMENDA A CONSTITUICAO/.test(normalized)) return "PEC";
+  if (/\bPDL\b|PROJETO DE DECRETO LEGISLATIVO/.test(normalized)) return "PDL";
+  if (/\bPRC\b|PROJETO DE RESOLUCAO/.test(normalized)) return "PRC";
+  if (/\bMPV\b|MEDIDA PROVISORIA/.test(normalized)) return "MPV";
+  if (/\bRIC\b|REQUERIMENTO DE INFORMACAO/.test(normalized)) return "RIC";
+  if (/\bPFC\b|PROPOSTA DE FISCALIZACAO/.test(normalized)) return "PFC";
+  if (/\bREQ\b|REQUERIMENTO/.test(normalized)) return "REQ";
+  if (/\bEMP\b|EMENDA/.test(normalized)) return "EMP";
+  if (/\bSBT\b|SUBSTITUTIVO/.test(normalized)) return "SBT";
+  if (/\bDTQ\b|DESTAQUE/.test(normalized)) return "DTQ";
+  if (/\bVTS\b|VOTACAO EM SEPARADO/.test(normalized)) return "VTS";
+  if (/\bRCP\b|COMISSAO PARLAMENTAR/.test(normalized)) return "RCP";
+  if (/\bMSC\b|MENSAGEM/.test(normalized)) return "MSC";
+  if (/\bINC\b|INDICACAO/.test(normalized)) return "INC";
+  if (/\bPL\b|PROJETO DE LEI/.test(normalized)) return "PL";
+  return normalized ? "OUTRO" : "INCERTO";
+}
+
+export function inferVoteObjectType(description: string | null | undefined): VoteObjectType {
+  const text = normalizeProposalText(description || "");
+  if (!text) return "unclear";
+  if (/\bemenda\b|\bemp\b/.test(text)) return "amendment";
+  if (/\bsubstitutivo\b|\bsbt\b/.test(text)) return "substitute";
+  if (/\bdestaque\b|\bdtq\b/.test(text)) return "highlight";
+  if (/\burgencia\b|regime de urgencia/.test(text)) return "urgency";
+  if (/\badiamento\b|adiar\b/.test(text)) return "postponement";
+  if (/\bretirada de pauta\b|retirar de pauta/.test(text)) return "agenda_withdrawal";
+  if (/\brecurso\b/.test(text)) return "appeal";
+  if (/\brequerimento\b|\breq\b/.test(text)) return "procedural_request";
+  if (/\baprovacao\b|\bapreciacao\b|\bvotacao nominal\b|\bmerito\b|\bprojeto\b/.test(text)) return "main_bill";
+  return "unclear";
+}
+
+export function normalizeProposalAnalysis(raw: ProposalClassification): ProposalClassification {
+  const payload = raw.analysisPayload ?? { ...raw };
+  return {
+    ...raw,
+    analysisMethodVersion: textValue(raw.analysisMethodVersion, METHODOLOGY_VERSION),
+    legislativeType: enumValue(raw.legislativeType, LEGISLATIVE_TYPES, "INCERTO"),
+    decisionNature: enumValue(raw.decisionNature, DECISION_NATURES, "unclear"),
+    decisionScope: enumValue(raw.decisionScope, DECISION_SCOPES, "unclear"),
+    declaredBenefit: textValue(raw.declaredBenefit),
+    hiddenCost: textValue(raw.hiddenCost),
+    netPublicEffect: enumValue(raw.netPublicEffect, NET_PUBLIC_EFFECTS, "unclear"),
+    hasTradeoff: booleanValue(raw.hasTradeoff),
+    summaryMatchesText: enumValue(raw.summaryMatchesText, SUMMARY_MATCHES_TEXT, "unclear"),
+    riskFlags: normalizeRiskFlags(raw.riskFlags),
+    criticalArticles: normalizeCriticalArticles(raw.criticalArticles),
+    analysisPayload: payload,
+  };
+}
+
+export function normalizeVoteAnalysis(raw: PublicVoteAnalysis): PublicVoteAnalysis {
+  const confidence = Math.min(1, Math.max(0, Number(raw.confidence ?? 0.4)));
+  const payload = raw.analysisPayload ?? { ...raw };
+  return {
+    ...raw,
+    classification: enumValue(raw.classification, PUBLIC_VOTE_CLASSIFICATIONS, "neutral"),
+    severity: enumValue(raw.severity, PUBLIC_VOTE_SEVERITIES, "low"),
+    publicInterestVote: enumValue(raw.publicInterestVote, PUBLIC_INTEREST_VOTES, "none"),
+    confidence: Number.isFinite(confidence) ? confidence : 0.4,
+    isProceduralVote: booleanValue(raw.isProceduralVote),
+    legislativeType: enumValue(raw.legislativeType, LEGISLATIVE_TYPES, "INCERTO"),
+    decisionNature: enumValue(raw.decisionNature, DECISION_NATURES, "unclear"),
+    decisionScope: enumValue(raw.decisionScope, DECISION_SCOPES, "unclear"),
+    voteObjectType: enumValue(raw.voteObjectType, VOTE_OBJECT_TYPES, "unclear"),
+    voteObjectDescription: textValue(raw.voteObjectDescription),
+    yesMeans: textValue(raw.yesMeans),
+    noMeans: textValue(raw.noMeans),
+    analyzedTextMatchesVoteObject: enumValue(raw.analyzedTextMatchesVoteObject, SUMMARY_MATCHES_TEXT, "unclear"),
+    scoreImpactLimit: enumValue(raw.scoreImpactLimit, SCORE_IMPACT_LIMITS, "low"),
+    declaredBenefit: textValue(raw.declaredBenefit),
+    hiddenCost: textValue(raw.hiddenCost),
+    netPublicEffect: enumValue(raw.netPublicEffect, NET_PUBLIC_EFFECTS, "unclear"),
+    hasTradeoff: booleanValue(raw.hasTradeoff),
+    summaryMatchesText: enumValue(raw.summaryMatchesText, SUMMARY_MATCHES_TEXT, "unclear"),
+    riskFlags: normalizeRiskFlags(raw.riskFlags),
+    criticalArticles: normalizeCriticalArticles(raw.criticalArticles),
+    reason: textValue(raw.reason, "Análise limitada por falta de dados suficientes."),
+    analysisMethodVersion: textValue(raw.analysisMethodVersion, METHODOLOGY_VERSION),
+    analysisPayload: payload,
+  };
 }
 
 export function classifyProposal(
@@ -422,6 +753,76 @@ export function publicVoteScoreDelta(
   analysis: PublicVoteAnalysis,
   candidateVote: CandidateVote,
 ) {
+  const normalized = normalizeVoteAnalysis(analysis);
+  if (shouldZeroVoteScore(normalized)) return 0;
+  if (candidateVote === "absent" || candidateVote === "abstain") return 0;
+  if (normalized.publicInterestVote !== "yes" && normalized.publicInterestVote !== "no") return 0;
+
+  const aligned = candidateVote === normalized.publicInterestVote;
+  let delta = aligned ? basePointsFromSeverity(normalized.severity) : -basePointsFromSeverity(normalized.severity);
+  if (
+    normalized.classification === "negative_public_interest" ||
+    normalized.classification === "harmful_or_self_serving"
+  ) {
+    delta = aligned ? Math.round(delta * 0.7) : delta;
+  }
+  if (normalized.classification === "low_relevance") delta = aligned ? -2 : 0;
+  delta = applyScoreImpactLimit(delta, normalized.scoreImpactLimit ?? "low");
+  delta = applyConfidenceLimit(delta, normalized.confidence);
+  if (normalized.isProceduralVote && normalized.scoreImpactLimit === "low") {
+    delta = Math.sign(delta) * Math.min(Math.abs(delta), 3);
+  }
+  return delta;
+}
+
+function shouldZeroVoteScore(analysis: PublicVoteAnalysis) {
+  return (
+    analysis.publicInterestVote === "none" ||
+    analysis.publicInterestVote === "any" ||
+    analysis.voteObjectType === "unclear" ||
+    analysis.analyzedTextMatchesVoteObject === "false" ||
+    analysis.riskFlags?.includes("vote_object_unclear") === true ||
+    analysis.riskFlags?.includes("text_does_not_match_vote_object") === true ||
+    analysis.confidence < 0.5
+  );
+}
+
+function applyScoreImpactLimit(points: number, limit: ScoreImpactLimit) {
+  const maxByLimit: Record<ScoreImpactLimit, number> = {
+    none: 0,
+    low: 3,
+    medium: 8,
+    high: 15,
+    critical: 25,
+  };
+  return Math.sign(points) * Math.min(Math.abs(points), maxByLimit[limit]);
+}
+
+function applyConfidenceLimit(points: number, confidence: number) {
+  if (confidence < 0.5) return 0;
+  if (confidence < 0.65) return Math.sign(points) * Math.min(Math.abs(points), 3);
+  if (confidence < 0.75) return Math.sign(points) * Math.min(Math.abs(points), 8);
+  return points;
+}
+
+function basePointsFromSeverity(severity: PublicVoteSeverity) {
+  if (severity === "critical") return 21;
+  if (severity === "high") return 13;
+  if (severity === "medium") return 8;
+  return 3;
+}
+
+function legacySeverityPoints(severity: PublicVoteSeverity) {
+  if (severity === "critical") return 30;
+  if (severity === "high") return 18;
+  if (severity === "medium") return 10;
+  return 4;
+}
+
+export function legacyPublicVoteScoreDelta(
+  analysis: PublicVoteAnalysis,
+  candidateVote: CandidateVote,
+) {
   if (analysis.confidence < 0.6) return 0;
   if (candidateVote === "absent") {
     if (analysis.severity !== "high" && analysis.severity !== "critical") return 0;
@@ -429,10 +830,10 @@ export function publicVoteScoreDelta(
   }
   if (candidateVote === "abstain") return 0;
   if (analysis.publicInterestVote === "none") return 0;
-  if (analysis.publicInterestVote === "any") return severityPoints(analysis.severity);
+  if (analysis.publicInterestVote === "any") return legacySeverityPoints(analysis.severity);
 
   const aligned = candidateVote === analysis.publicInterestVote;
-  const points = severityPoints(analysis.severity);
+  const points = legacySeverityPoints(analysis.severity);
   if (analysis.classification === "negative_public_interest") {
     return aligned ? Math.round(points * 0.6) : -points;
   }
@@ -477,6 +878,22 @@ function publicVoteRule(
   return {
     voteId,
     ...analysis,
+    isProceduralVote: analysis.publicInterestVote === "none",
+    legislativeType: "INCERTO",
+    decisionNature: analysis.publicInterestVote === "none" ? "symbolic" : "substantive_policy",
+    decisionScope: analysis.publicInterestVote === "none" ? "symbolic_only" : "national_policy",
+    voteObjectType: "main_bill",
+    analyzedTextMatchesVoteObject: "true",
+    scoreImpactLimit: analysis.severity,
+    netPublicEffect:
+      analysis.classification === "positive_public_interest"
+        ? "positive"
+        : analysis.classification === "negative_public_interest" || analysis.classification === "harmful_or_self_serving"
+          ? "negative"
+          : "unclear",
+    summaryMatchesText: "unclear",
+    riskFlags: ["none"],
+    criticalArticles: [],
     source: "rule",
     analysisLevel: 1,
     reviewedManually: false,
@@ -486,11 +903,4 @@ function publicVoteRule(
 
 function matchesAny(value: string, patterns: RegExp[]) {
   return patterns.some((pattern) => pattern.test(value));
-}
-
-function severityPoints(severity: PublicVoteSeverity) {
-  if (severity === "critical") return 30;
-  if (severity === "high") return 18;
-  if (severity === "medium") return 10;
-  return 4;
 }

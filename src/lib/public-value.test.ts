@@ -5,11 +5,13 @@ import {
   classifyPublicVote,
   classifyProposal,
   getProposalWeight,
+  normalizeVoteAnalysis,
   proposalContributionPoints,
   publicVoteScoreDelta,
   type ParticipationRole,
   type ProposalNature,
   type ProposalStage,
+  type PublicVoteAnalysis,
 } from "./public-value";
 
 test("classifies a single clear public-value theme", () => {
@@ -71,10 +73,10 @@ test("scores public votes by alignment and absence severity", () => {
     "",
   );
   assert.ok(analysis);
-  assert.equal(publicVoteScoreDelta(analysis, "yes"), 18);
+  assert.equal(publicVoteScoreDelta(analysis, "yes"), 13);
   assert.equal(publicVoteScoreDelta(analysis, "no"), -13);
   assert.equal(publicVoteScoreDelta(analysis, "abstain"), 0);
-  assert.equal(publicVoteScoreDelta(analysis, "absent"), -4);
+  assert.equal(publicVoteScoreDelta(analysis, "absent"), 0);
 });
 
 test("does not penalize low-confidence public vote analysis", () => {
@@ -95,6 +97,99 @@ test("does not penalize low-confidence public vote analysis", () => {
     "yes",
   );
   assert.equal(record.scoreDelta, 0);
+});
+
+function voteFixture(overrides: Partial<PublicVoteAnalysis> = {}): PublicVoteAnalysis {
+  return normalizeVoteAnalysis({
+    voteId: "fixture",
+    classification: "positive_public_interest",
+    severity: "high",
+    publicInterestVote: "yes",
+    confidence: 0.9,
+    isProceduralVote: false,
+    legislativeType: "PL",
+    decisionNature: "substantive_policy",
+    decisionScope: "national_policy",
+    voteObjectType: "main_bill",
+    analyzedTextMatchesVoteObject: "true",
+    scoreImpactLimit: "high",
+    netPublicEffect: "positive",
+    riskFlags: ["none"],
+    criticalArticles: [],
+    reason: "Impacto público claro.",
+    source: "llm",
+    analysisLevel: 3,
+    reviewedManually: false,
+    methodologyVersion: "legislative-impact-v2",
+    ...overrides,
+  });
+}
+
+test("limits apparent benefit with hidden workload cost", () => {
+  const analysis = voteFixture({
+    classification: "negative_public_interest",
+    publicInterestVote: "no",
+    netPublicEffect: "negative",
+    declaredBenefit: "Reduz dias trabalhados.",
+    hiddenCost: "Permite aumento da jornada diária.",
+    riskFlags: ["benefit_offset_by_hidden_cost", "increased_workload"],
+  });
+  assert.equal(analysis.netPublicEffect, "negative");
+  assert.ok(analysis.riskFlags?.includes("benefit_offset_by_hidden_cost"));
+  assert.equal(publicVoteScoreDelta(analysis, "no"), 9);
+});
+
+test("does not treat vote against amendment as vote against whole bill when object text is unclear", () => {
+  const analysis = voteFixture({
+    voteObjectType: "amendment",
+    analyzedTextMatchesVoteObject: "unclear",
+    scoreImpactLimit: "low",
+    confidence: 0.6,
+    riskFlags: ["unrelated_amendment"],
+  });
+  assert.equal(publicVoteScoreDelta(analysis, "no"), -3);
+});
+
+test("keeps urgency request procedural and low impact", () => {
+  const analysis = voteFixture({
+    classification: "neutral",
+    publicInterestVote: "none",
+    isProceduralVote: true,
+    voteObjectType: "urgency",
+    scoreImpactLimit: "low",
+    riskFlags: ["procedural_only"],
+  });
+  assert.equal(publicVoteScoreDelta(analysis, "yes"), 0);
+});
+
+test("caps RIC/PFC-style oversight impact at medium", () => {
+  const analysis = voteFixture({
+    legislativeType: "RIC",
+    decisionNature: "information_request",
+    decisionScope: "oversight",
+    severity: "high",
+    scoreImpactLimit: "medium",
+  });
+  assert.equal(publicVoteScoreDelta(analysis, "yes"), 8);
+});
+
+test("keeps PEC without full text uncertain and low confidence", () => {
+  const analysis = voteFixture({
+    legislativeType: "PEC",
+    confidence: 0.6,
+    scoreImpactLimit: "low",
+    netPublicEffect: "unclear",
+    riskFlags: ["insufficient_text"],
+  });
+  assert.equal(publicVoteScoreDelta(analysis, "yes"), 3);
+});
+
+test("zeros score when analyzed text does not match vote object", () => {
+  const analysis = voteFixture({
+    analyzedTextMatchesVoteObject: "false",
+    riskFlags: ["text_does_not_match_vote_object"],
+  });
+  assert.equal(publicVoteScoreDelta(analysis, "yes"), 0);
 });
 
 test("getProposalWeight: author+substantive presented = 2 (base)", () => {

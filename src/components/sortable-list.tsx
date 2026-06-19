@@ -2,7 +2,6 @@
 
 import { useState, useMemo } from "react";
 import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 type SortConfig = {
   key: string;
@@ -50,7 +49,7 @@ export function SortableMoneyList({
     }));
   }
 
-  function SortIcon({ columnKey }: { columnKey: string }) {
+  function renderSortIcon(columnKey: string) {
     if (sort.key !== columnKey) return <ArrowUpDown className="size-3" />;
     return sort.direction === "asc" ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />;
   }
@@ -63,21 +62,21 @@ export function SortableMoneyList({
           onClick={() => toggle("label")}
           className="flex items-center gap-1 text-left hover:text-foreground"
         >
-          Fornecedor <SortIcon columnKey="label" />
+          Fornecedor {renderSortIcon("label")}
         </button>
         <button
           type="button"
           onClick={() => toggle("detail")}
           className="flex items-center gap-1 text-left hover:text-foreground"
         >
-          Documentos <SortIcon columnKey="detail" />
+          Documentos {renderSortIcon("detail")}
         </button>
         <button
           type="button"
           onClick={() => toggle("value")}
           className="flex items-center gap-1 justify-end hover:text-foreground"
         >
-          Total <SortIcon columnKey="value" />
+          Total {renderSortIcon("value")}
         </button>
       </div>
       <div className="divide-y">

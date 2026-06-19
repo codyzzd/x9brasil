@@ -70,6 +70,11 @@ export async function saveConfig(config: AppConfig): Promise<void> {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const REQUEST_BACKOFF_MS = [5_000, 15_000, 30_000, 60_000, 120_000];
+const MIN_DELAY_BETWEEN_REQUESTS_MS = 800;
+let globalPauseUntil = 0;
+let nextRequestAt = 0;
+let requestGate = Promise.resolve();
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -86,28 +91,62 @@ function readStringArray(value: unknown, field = "id") {
     .filter((item): item is string => typeof item === "string");
 }
 
+function jitter(ms = 3_000) {
+  return Math.floor(Math.random() * ms);
+}
+
+function retryAfterMs(response: Response) {
+  const retryAfter = response.headers.get("retry-after");
+  if (!retryAfter) return null;
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const date = Date.parse(retryAfter);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null;
+}
+
+async function waitForRequestSlot() {
+  const previous = requestGate;
+  const current = previous
+    .catch(() => undefined)
+    .then(async () => {
+      const now = Date.now();
+      const waitMs = Math.max(globalPauseUntil, nextRequestAt) - now;
+      if (waitMs > 0) await sleep(waitMs);
+      nextRequestAt = Date.now() + MIN_DELAY_BETWEEN_REQUESTS_MS;
+    });
+  requestGate = current;
+  await current;
+}
+
+function backoffDelay(attempt: number, response?: Response) {
+  const retryAfter = response ? retryAfterMs(response) : null;
+  const configured = REQUEST_BACKOFF_MS[Math.min(attempt, REQUEST_BACKOFF_MS.length - 1)];
+  return Math.max(retryAfter ?? 0, configured) + jitter();
+}
+
 async function fetchWithRetry(
   url: string,
   options: RequestInit,
-  maxRetries = 3,
-  initialDelay = 3000,
+  maxRetries = 5,
 ): Promise<Response> {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
+      await waitForRequestSlot();
       const response = await fetch(url, options);
       if (response.ok) return response;
       if (response.status === 429 || response.status >= 500) {
         if (attempt >= maxRetries - 1) return response;
-        const delay = initialDelay * Math.pow(2, attempt);
-        console.warn(`  ⚠️ API retornou status ${response.status}. Tentativa ${attempt + 1}/${maxRetries}. Aguardando ${delay / 1000}s...`);
+        const delay = backoffDelay(attempt, response);
+        if (response.status === 429) globalPauseUntil = Math.max(globalPauseUntil, Date.now() + delay);
+        console.warn(`  ⚠️ API retornou status ${response.status}. Tentativa ${attempt + 1}/${maxRetries}. Pausando fila por ~${Math.round(delay / 1000)}s...`);
         await sleep(delay);
         continue;
       }
       return response;
     } catch (err: unknown) {
       if (attempt >= maxRetries - 1) throw err;
-      const delay = initialDelay * Math.pow(2, attempt);
-      console.warn(`  ⚠️ Falha de rede (${errorMessage(err)}). Tentativa ${attempt + 1}/${maxRetries}. Aguardando ${delay / 1000}s...`);
+      const delay = backoffDelay(attempt);
+      console.warn(`  ⚠️ Falha de rede (${errorMessage(err)}). Tentativa ${attempt + 1}/${maxRetries}. Aguardando ~${Math.round(delay / 1000)}s...`);
       await sleep(delay);
     }
   }
@@ -181,11 +220,20 @@ class OpenAICompatibleProvider implements LLMProvider {
 
   async generateContent(prompt: string, options: { model: string; temperature?: number; responseMimeType?: string }): Promise<string> {
     const key = this.getApiKey();
-    const body = {
+    const jsonMode = options.responseMimeType === "application/json";
+    const body: Record<string, unknown> = {
       model: options.model,
-      messages: [{ role: "user", content: prompt }],
+      messages: jsonMode
+        ? [
+            { role: "system", content: "Return only one valid json object. Do not include markdown or prose outside the json object." },
+            { role: "user", content: prompt },
+          ]
+        : [{ role: "user", content: prompt }],
       temperature: options.temperature ?? 0.1,
     };
+    if (jsonMode) {
+      body.response_format = { type: "json_object" };
+    }
     const res = await fetchWithRetry(
       `${this.baseUrl}/v1/chat/completions`,
       { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify(body) },

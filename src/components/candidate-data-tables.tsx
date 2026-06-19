@@ -62,6 +62,43 @@ function severityPoints(value: string) {
   return 4
 }
 
+function netPublicEffectLabel(value: string) {
+  if (value === "positive") return "positivo"
+  if (value === "negative") return "negativo"
+  if (value === "mixed") return "misto"
+  if (value === "unclear") return "incerto"
+  return "-"
+}
+
+function scoreImpactLimitLabel(value: string) {
+  if (value === "none") return "zerado"
+  if (value === "low") return "baixo"
+  if (value === "medium") return "médio"
+  if (value === "high") return "alto"
+  if (value === "critical") return "crítico"
+  return "-"
+}
+
+function riskFlagLabel(value: string) {
+  return value
+    .replaceAll("_", " ")
+    .replace("benefit offset by hidden cost", "benefício compensado por custo escondido")
+    .replace("hidden revocation", "revogação escondida")
+    .replace("scope mismatch", "escopo divergente")
+    .replace("unrelated amendment", "emenda sem relação clara")
+    .replace("privilege or benefit", "privilégio ou benefício")
+    .replace("fiscal impact", "impacto fiscal")
+    .replace("transparency reduction", "redução de transparência")
+    .replace("oversight reduction", "redução de fiscalização")
+    .replace("constitutional risk", "risco constitucional")
+    .replace("increased workload", "aumento de carga")
+    .replace("reduced rights", "redução de direitos")
+    .replace("procedural only", "apenas procedimental")
+    .replace("vote object unclear", "objeto do voto incerto")
+    .replace("text does not match vote object", "texto não corresponde ao objeto")
+    .replace("insufficient text", "texto insuficiente")
+}
+
 function candidateVoteLabel(value: string) {
   if (value === "yes") return "sim"
   if (value === "no") return "não"
@@ -185,7 +222,7 @@ const VOTE_POSITIONING_SEGMENTS: {
 type ExpenseCategory = { name: string; total: number; documents: number }
 type Supplier = { name: string; taxId: string | null; total: number; documents: number }
 type LargestExpense = { category: string; supplier: string; date: string; value: number; documentUrl: string | null }
-type PublicVote = { voteId: string; date: string; description: string; summary: string; url: string; candidateVote: string; classification: string; severity: string; scoreDelta: number; confidence: number | null; reason: string; source: string; analysisLevel: 1 | 2 | 3 | null; reviewedManually: boolean }
+type PublicVote = { voteId: string; date: string; description: string; summary: string; url: string; candidateVote: string; classification: string; severity: string; scoreDelta: number; confidence: number | null; reason: string; source: string; analysisLevel: 1 | 2 | 3 | null; reviewedManually: boolean; analysisMethodVersion?: string; legislativeType?: string; decisionNature?: string; decisionScope?: string; voteObjectType?: string; voteObjectDescription?: string; yesMeans?: string; noMeans?: string; analyzedTextMatchesVoteObject?: string; scoreImpactLimit?: string; isProceduralVote?: boolean; declaredBenefit?: string; hiddenCost?: string; netPublicEffect?: string; hasTradeoff?: boolean; summaryMatchesText?: string; riskFlags?: string[]; criticalArticles?: Array<{ article: string; issue: string }> }
 type Amendment = { number: string; year: string; type: string; beneficiary: string; proposedValue: number; transferredValue: number }
 type Asset = { type: string; description: string; value: number }
 type CampaignDonor = { name: string; value: number }
@@ -407,6 +444,62 @@ function VoteDetailSheet({
             </p>
           </section>
 
+          {analyzed && (vote.analysisMethodVersion || vote.netPublicEffect || vote.voteObjectType) && (
+            <section>
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                Auditoria N3
+              </h4>
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Objeto</dt>
+                  <dd>{vote.voteObjectDescription || vote.voteObjectType || "-"}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tipo</dt>
+                  <dd>{vote.legislativeType || "-"}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Efeito líquido</dt>
+                  <dd>{netPublicEffectLabel(vote.netPublicEffect || "")}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Limite</dt>
+                  <dd>{scoreImpactLimitLabel(vote.scoreImpactLimit || "")}</dd>
+                </div>
+              </dl>
+              {(vote.yesMeans || vote.noMeans) && (
+                <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                  {vote.yesMeans && <p><span className="font-medium text-foreground">Sim:</span> {vote.yesMeans}</p>}
+                  {vote.noMeans && <p><span className="font-medium text-foreground">Não:</span> {vote.noMeans}</p>}
+                </div>
+              )}
+              {(vote.declaredBenefit || vote.hiddenCost) && (
+                <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                  {vote.declaredBenefit && <p><span className="font-medium text-foreground">Benefício declarado:</span> {vote.declaredBenefit}</p>}
+                  {vote.hiddenCost && <p><span className="font-medium text-foreground">Custo escondido:</span> {vote.hiddenCost}</p>}
+                </div>
+              )}
+              {vote.riskFlags && vote.riskFlags.filter((flag) => flag !== "none").length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {vote.riskFlags.filter((flag) => flag !== "none").map((flag) => (
+                    <Badge key={flag} variant="outline" className="text-[11px]">
+                      {riskFlagLabel(flag)}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+              {vote.criticalArticles && vote.criticalArticles.length > 0 && (
+                <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
+                  {vote.criticalArticles.map((item, index) => (
+                    <li key={`${item.article}-${index}`}>
+                      <span className="font-medium text-foreground">{item.article}:</span> {item.issue}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+
           <section>
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
               Impacto
@@ -432,6 +525,15 @@ function VoteDetailSheet({
                     )}
                     {vote.candidateVote === "absent" && (
                       <li>Ausência em votação de severidade {severityLabel(vote.severity)}</li>
+                    )}
+                    {vote.scoreImpactLimit === "none" && (
+                      <li>Impacto zerado porque não há base suficiente para concluir com segurança.</li>
+                    )}
+                    {vote.scoreImpactLimit === "low" && (
+                      <li>Impacto limitado porque o objeto ou texto específico não permite conclusão forte.</li>
+                    )}
+                    {vote.analyzedTextMatchesVoteObject === "false" && (
+                      <li>Texto analisado não corresponde ao objeto exato da votação.</li>
                     )}
                     {vote.severity && vote.candidateVote !== "absent" && vote.candidateVote !== "abstain" && (
                       <li>Voto {aligned ? "alinhado" : "contrário"} ao interesse público</li>

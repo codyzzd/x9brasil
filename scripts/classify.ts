@@ -6,10 +6,19 @@ import {
   VOTE_METHODOLOGY_VERSION,
   buildPublicVoteRecord,
   getProposalWeight,
+  inferLegislativeType,
+  inferVoteObjectType,
+  normalizeProposalAnalysis,
+  normalizeVoteAnalysis,
   proposalStageMultiplier,
   publicValueClassificationMetadata,
   type CandidateVote,
   type ClassificationConfidence,
+  type CriticalArticle,
+  type DecisionNature,
+  type DecisionScope,
+  type LegislativeType,
+  type NetPublicEffect,
   type ParticipationRole,
   type ProposalNature,
   type ProposalStage,
@@ -18,6 +27,10 @@ import {
   type PublicVoteClassification,
   type PublicVoteSeverity,
   type PublicInterestVote,
+  type RiskFlag,
+  type ScoreImpactLimit,
+  type SummaryMatchesText,
+  type VoteObjectType,
 } from "../src/lib/public-value";
 import {
   detectContextLimit,
@@ -53,6 +66,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 const PAGE_SIZE = 1000;
 const BATCH_SIZE = 500;
 const DEFAULT_LIMIT = 10;
+const DEFAULT_CONCURRENCY = 1;
 const DEFAULT_DELAY_MS = 2000;
 
 type Row = Record<string, unknown>;
@@ -107,6 +121,18 @@ type ProposalLlmResult = {
   category: PublicValueCategory;
   confidence: ClassificationConfidence;
   justification: string;
+  analysisMethodVersion?: string;
+  legislativeType?: LegislativeType;
+  decisionNature?: DecisionNature;
+  decisionScope?: DecisionScope;
+  declaredBenefit?: string;
+  hiddenCost?: string;
+  netPublicEffect?: NetPublicEffect;
+  hasTradeoff?: boolean;
+  summaryMatchesText?: SummaryMatchesText;
+  riskFlags?: RiskFlag[];
+  criticalArticles?: CriticalArticle[];
+  analysisPayload?: Record<string, unknown>;
 };
 
 type VoteLlmResult = {
@@ -114,12 +140,35 @@ type VoteLlmResult = {
   severity: PublicVoteSeverity;
   publicInterestVote: PublicInterestVote;
   confidence: number;
+  isProceduralVote?: boolean;
+  legislativeType?: LegislativeType;
+  decisionNature?: DecisionNature;
+  decisionScope?: DecisionScope;
+  voteObjectType?: VoteObjectType;
+  voteObjectDescription?: string;
+  yesMeans?: string;
+  noMeans?: string;
+  analyzedTextMatchesVoteObject?: SummaryMatchesText;
+  scoreImpactLimit?: ScoreImpactLimit;
+  declaredBenefit?: string;
+  hiddenCost?: string;
+  netPublicEffect?: NetPublicEffect;
+  hasTradeoff?: boolean;
+  summaryMatchesText?: SummaryMatchesText;
+  riskFlags?: RiskFlag[];
+  criticalArticles?: CriticalArticle[];
   reason: string;
+  analysisMethodVersion?: string;
+  analysisPayload?: Record<string, unknown>;
 };
 
 type RunStats = {
   proposals: { classified: number; failed: number; skipped: number; metricRows: number };
   votes: { classified: number; failed: number; skipped: number; metricRows: number; linksUpdated: number };
+};
+type EligibilityCounts = {
+  votes: { total: number; classified: number; improvable: number; overwrite: number };
+  proposals: { total: number; classified: number; improvable: number; overwrite: number };
 };
 type Wizard = ReturnType<typeof createInterface>;
 
@@ -178,6 +227,31 @@ async function upsertBatches(table: string, rows: Row[], onConflict: string) {
   }
 }
 
+async function assertLegislativeImpactSchema() {
+  const checks = [
+    supabase
+      .from("vote_classifications")
+      .select("analysis_method_version, legislative_type, vote_object_type, score_impact_limit, analysis_payload")
+      .limit(1),
+    supabase
+      .from("proposal_classifications")
+      .select("analysis_method_version, legislative_type, net_public_effect, analysis_payload")
+      .limit(1),
+  ];
+  const results = await Promise.all(checks);
+  const error = results.find((result) => result.error)?.error;
+  if (!error) return;
+
+  throw new Error(
+    [
+      "O Supabase ainda não tem as colunas da metodologia N3 legislative-impact-v2.",
+      "Aplique a migração supabase/migrations/20260619000000_add_legislative_impact_v2_analysis.sql antes de rodar nível 3.",
+      "Com o projeto linkado, use: SUPABASE_DB_PASSWORD='senha-do-postgres' supabase db push --linked --yes",
+      `Erro do Supabase: ${error.message}`,
+    ].join("\n"),
+  );
+}
+
 function pairKey(legislatorId: number, periodId: string) {
   return `${legislatorId}|${periodId}`;
 }
@@ -211,8 +285,84 @@ function shouldClassify(row: ClassificationRow | undefined, level: AnalysisLevel
   return scope === "overwrite" ? current <= level : current < level;
 }
 
+async function getEligibilityCounts(level: AnalysisLevel): Promise<EligibilityCounts> {
+  const [votes, voteClassifications, proposals, proposalClassifications] = await Promise.all([
+    fetchAll<{ id: string }>("votes", "id"),
+    fetchAll<{ vote_id: string; source: string | null; analysis_level: number | null }>(
+      "vote_classifications",
+      "vote_id, source, analysis_level",
+    ),
+    fetchAll<{ id: string }>("proposals", "id"),
+    fetchAll<{ proposal_id: string; source: string | null; analysis_level: number | null }>(
+      "proposal_classifications",
+      "proposal_id, source, analysis_level",
+      "proposal_id",
+    ),
+  ]);
+
+  const voteMap = new Map(voteClassifications.map((row) => [row.vote_id, row]));
+  const proposalMap = new Map(proposalClassifications.map((row) => [row.proposal_id, row]));
+
+  return {
+    votes: {
+      total: votes.length,
+      classified: voteClassifications.length,
+      improvable: votes.filter((vote) => shouldClassify(voteMap.get(vote.id), level, "improvable")).length,
+      overwrite: votes.filter((vote) => shouldClassify(voteMap.get(vote.id), level, "overwrite")).length,
+    },
+    proposals: {
+      total: proposals.length,
+      classified: proposalClassifications.length,
+      improvable: proposals.filter((proposal) => shouldClassify(proposalMap.get(proposal.id), level, "improvable")).length,
+      overwrite: proposals.filter((proposal) => shouldClassify(proposalMap.get(proposal.id), level, "overwrite")).length,
+    },
+  };
+}
+
+function printEligibilityCounts(target: ClassifyTarget, counts: EligibilityCounts) {
+  const rows = target === "both"
+    ? [["Votações", counts.votes], ["Proposições", counts.proposals]] as const
+    : target === "votes"
+      ? [["Votações", counts.votes]] as const
+      : [["Proposições", counts.proposals]] as const;
+
+  console.log("\nQuantidade elegível neste nível:");
+  for (const [label, row] of rows) {
+    console.log(`  ${label}: ${row.total} totais, ${row.classified} já classificadas`);
+    console.log(`    Pendentes/melhoráveis: ${row.improvable}`);
+    console.log(`    Sobrescrever mesmo nível/inferior: ${row.overwrite}`);
+  }
+}
+
 function cleanJson(text: string) {
-  return text.replace(/```json\s*|\s*```/g, "").trim();
+  const stripped = text.replace(/```json\s*|\s*```/g, "").trim();
+  const start = stripped.indexOf("{");
+  if (start < 0) return stripped;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < stripped.length; index++) {
+    const char = stripped[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "\"") {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+    if (depth === 0) return stripped.slice(start, index + 1);
+  }
+
+  return stripped;
 }
 
 function errorMessage(error: unknown) {
@@ -230,7 +380,13 @@ function truncatePrompt(prompt: string, model: string) {
   const tokens = estimateTokens(prompt);
   if (tokens <= contextLimit * 0.8) return prompt;
   const maxChars = Math.floor(contextLimit * 0.75 * 4);
-  return `${prompt.slice(0, maxChars)}\n\n[... TEXTO TRUNCADO por limite de contexto ...]`;
+  const headChars = Math.floor(maxChars * 0.65);
+  const tailChars = maxChars - headChars;
+  return [
+    prompt.slice(0, headChars),
+    "\n\n[... TEXTO TRUNCADO por limite de contexto; mantendo instruções finais e schema JSON ...]\n\n",
+    prompt.slice(-tailChars),
+  ].join("");
 }
 
 function shortText(value: string, maxLength = 220) {
@@ -267,9 +423,47 @@ function recordDuration(recentDurations: number[], startedAt: number) {
 }
 
 function proposalPrompt(proposal: ProposalRow, level: AnalysisLevel, fullText?: FullTextResult) {
+  const legislativeType = inferLegislativeType(`${proposal.type ?? ""} ${proposal.summary ?? ""}`);
   const fullTextBlock = level === 3 && fullText
     ? `\nTEXTO INTEGRAL DA PROPOSIÇÃO:\n${fullText.text}\n`
     : "";
+  if (level === 3) {
+    return `Você é um analista legislativo técnico, imparcial e conservador na classificação.
+Avalie a proposição pelo impacto público real, não pela promessa da ementa.
+Não favoreça partido, governo, oposição, ideologia, autor, categoria profissional ou grupo econômico.
+Quando houver texto integral, analise artigos, parágrafos, incisos, exceções, revogações e disposições transitórias.
+${fullTextBlock}
+DADOS OFICIAIS:
+ID: ${proposal.id}
+Tipo: ${proposal.type ?? ""} ${proposal.number ?? ""}/${proposal.year ?? ""}
+Tipo legislativo inferido: ${legislativeType}
+Data: ${proposal.proposal_date ?? ""}
+Ementa: ${proposal.summary ?? ""}
+Situação: ${proposal.status ?? ""}
+
+Antes de classificar, identifique benefício declarado, custo escondido, trade-off, efeito público líquido, se a ementa combina com o texto e artigos críticos.
+Se o texto for insuficiente, reduza confiança e use netPublicEffect = "unclear".
+
+Categorias: "anti_corruption" | "public_transparency" | "waste_reduction" | "health" | "education" | "security" | "infrastructure" | "jobs_economy" | "state_modernization" | "technology_innovation" | "deregulation" | "tribute" | "commemorative_date" | "motion" | "place_naming".
+
+Retorne APENAS JSON válido:
+{
+  "analysisMethodVersion": "legislative-impact-v2",
+  "category": "anti_corruption | public_transparency | waste_reduction | health | education | security | infrastructure | jobs_economy | state_modernization | technology_innovation | deregulation | tribute | commemorative_date | motion | place_naming",
+  "confidence": "high | medium | low",
+  "legislativeType": "PL | PLP | PEC | PDL | PRC | MPV | RIC | PFC | REQ | EMP | SBT | DTQ | VTS | RCP | MSC | INC | OUTRO | INCERTO",
+  "decisionNature": "substantive_policy | constitutional_change | fiscal_budgetary | oversight_control | information_request | criminal_penalty | rights_expansion | rights_restriction | institutional_rule | symbolic | commemorative | procedural | unclear",
+  "decisionScope": "national_policy | constitutional_rule | fiscal_effect | criminal_law | administrative_control | congressional_procedure | oversight | symbolic_only | local_or_specific | unclear",
+  "declaredBenefit": "Benefício aparente da proposta.",
+  "hiddenCost": "Custo escondido, exceção, revogação ou efeito colateral relevante.",
+  "netPublicEffect": "positive | negative | mixed | unclear",
+  "hasTradeoff": true,
+  "summaryMatchesText": "true | false | unclear",
+  "riskFlags": ["benefit_offset_by_hidden_cost | hidden_revocation | scope_mismatch | unrelated_amendment | jabuti | privilege_or_benefit | corporate_or_category_benefit | economic_group_benefit | fiscal_impact | transparency_reduction | oversight_reduction | constitutional_risk | increased_workload | increased_cost_or_tax | increased_bureaucracy | reduced_rights | procedural_only | insufficient_text | none"],
+  "criticalArticles": [{ "article": "Art. X", "issue": "Explicação curta do ponto de atenção." }],
+  "justification": "Explicação curta em português com critério principal, benefício aparente, riscos, trade-offs e efeito líquido."
+}`;
+  }
   return `Você é um analista político sênior especializado no processo legislativo brasileiro.
 Classifique a proposição da Câmara dos Deputados de acordo com valor público e interesse social.
 ${fullTextBlock}
@@ -306,9 +500,61 @@ Responda APENAS com JSON válido:
 }
 
 function votePrompt(vote: VoteRow, level: AnalysisLevel, fullText?: FullTextResult) {
+  const legislativeType = inferLegislativeType(`${vote.description ?? ""} ${vote.summary ?? ""}`);
+  const voteObjectType = inferVoteObjectType(vote.description);
   const fullTextBlock = level === 3 && fullText
     ? `\nTEXTO INTEGRAL DA PROPOSIÇÃO RELACIONADA:\n${fullText.text}\n`
     : "";
+  if (level === 3) {
+    return `Você é um analista legislativo técnico, imparcial e conservador na aplicação de score.
+Avalie a votação pelo impacto público real e pelo objeto exato votado.
+Não classifique pelo título, ementa, resumo oficial ou intenção declarada.
+Nunca trate voto contra emenda, destaque ou substitutivo como voto contra o projeto inteiro.
+Nunca trate urgência ou requerimento como mérito automático.
+${fullTextBlock}
+DADOS OFICIAIS DA VOTAÇÃO:
+ID: ${vote.id}
+Data: ${vote.vote_date ?? ""}
+Descrição oficial: ${vote.description ?? ""}
+Resumo da proposição associada: ${vote.summary ?? ""}
+Tipo legislativo inferido: ${legislativeType}
+Objeto da votação inferido: ${voteObjectType}
+
+Siga esta ordem: identifique o objeto exato, explique o que significava votar "sim" e "não", verifique se o texto analisado corresponde ao objeto votado, diferencie mérito de procedimento, identifique benefício declarado, custos escondidos, trade-offs, efeito público líquido, confiança e limite de impacto.
+
+Regras de segurança:
+- Se o objeto da votação não está claro, use voteObjectType = "unclear", publicInterestVote = "none" ou "any", confidence baixa e scoreImpactLimit = "none".
+- Se votação é procedimental sem efeito público direto claro, use isProceduralVote = true e scoreImpactLimit = "low".
+- Se for emenda/destaque/substitutivo e o texto específico não estiver disponível, use analyzedTextMatchesVoteObject = "unclear", confidence <= 0.6 e scoreImpactLimit = "low".
+- Só use scoreImpactLimit "high" ou "critical" com texto suficiente, objeto claro e efeito público direto.
+
+Retorne APENAS JSON válido:
+{
+  "analysisMethodVersion": "legislative-impact-v2",
+  "classification": "positive_public_interest | neutral | low_relevance | negative_public_interest | harmful_or_self_serving",
+  "severity": "low | medium | high | critical",
+  "publicInterestVote": "yes | no | any | none",
+  "confidence": 0.0,
+  "isProceduralVote": true,
+  "legislativeType": "PL | PLP | PEC | PDL | PRC | MPV | RIC | PFC | REQ | EMP | SBT | DTQ | VTS | RCP | MSC | INC | OUTRO | INCERTO",
+  "decisionNature": "substantive_policy | constitutional_change | fiscal_budgetary | oversight_control | information_request | criminal_penalty | rights_expansion | rights_restriction | institutional_rule | symbolic | commemorative | procedural | unclear",
+  "decisionScope": "national_policy | constitutional_rule | fiscal_effect | criminal_law | administrative_control | congressional_procedure | oversight | symbolic_only | local_or_specific | unclear",
+  "voteObjectType": "main_bill | amendment | substitute | highlight | urgency | procedural_request | postponement | agenda_withdrawal | appeal | other | unclear",
+  "voteObjectDescription": "Objeto exato da votação.",
+  "yesMeans": "O que votar sim aprovava, mantinha, acelerava ou apoiava.",
+  "noMeans": "O que votar não rejeitava, bloqueava, mantinha fora ou impedia.",
+  "analyzedTextMatchesVoteObject": "true | false | unclear",
+  "scoreImpactLimit": "none | low | medium | high | critical",
+  "declaredBenefit": "Benefício aparente ou declarado.",
+  "hiddenCost": "Custo escondido, exceção, revogação, trade-off ou efeito colateral.",
+  "netPublicEffect": "positive | negative | mixed | unclear",
+  "hasTradeoff": true,
+  "summaryMatchesText": "true | false | unclear",
+  "riskFlags": ["benefit_offset_by_hidden_cost | hidden_revocation | scope_mismatch | unrelated_amendment | jabuti | privilege_or_benefit | corporate_or_category_benefit | economic_group_benefit | fiscal_impact | transparency_reduction | oversight_reduction | constitutional_risk | increased_workload | increased_cost_or_tax | increased_bureaucracy | reduced_rights | procedural_only | vote_object_unclear | text_does_not_match_vote_object | insufficient_text | none"],
+  "criticalArticles": [{ "article": "Art. X", "issue": "Explicação curta do ponto de atenção." }],
+  "reason": "Explicação curta em português dizendo objeto, sim/não, benefício aparente, custo escondido, efeito líquido e voto alinhado."
+}`;
+  }
   return `Você é um analista político sênior especializado no processo legislativo brasileiro.
 Classifique a votação da Câmara dos Deputados de acordo com impacto público e interesse social.
 ${fullTextBlock}
@@ -359,11 +605,27 @@ function parseProposalResult(text: string): ProposalLlmResult {
   if (!parsed.justification || parsed.justification.length < 10) {
     throw new Error("justificativa ausente ou curta demais");
   }
-  return {
+  const result = normalizeProposalAnalysis({
     category: parsed.category,
     confidence: parsed.confidence,
     justification: parsed.justification,
-  };
+    source: "llm",
+    analysisLevel: 3,
+    methodologyVersion: "legislative-impact-v2",
+    analysisMethodVersion: parsed.analysisMethodVersion,
+    legislativeType: parsed.legislativeType,
+    decisionNature: parsed.decisionNature,
+    decisionScope: parsed.decisionScope,
+    declaredBenefit: parsed.declaredBenefit,
+    hiddenCost: parsed.hiddenCost,
+    netPublicEffect: parsed.netPublicEffect,
+    hasTradeoff: parsed.hasTradeoff,
+    summaryMatchesText: parsed.summaryMatchesText,
+    riskFlags: parsed.riskFlags,
+    criticalArticles: parsed.criticalArticles,
+    analysisPayload: parsed as Record<string, unknown>,
+  });
+  return { ...result, analysisPayload: parsed as Record<string, unknown> };
 }
 
 function parseVoteResult(text: string): VoteLlmResult {
@@ -383,13 +645,131 @@ function parseVoteResult(text: string): VoteLlmResult {
   if (!parsed.reason || parsed.reason.length < 10) {
     throw new Error("justificativa ausente ou curta demais");
   }
-  return {
+  const result = normalizeVoteAnalysis({
+    voteId: "",
     classification: parsed.classification,
     severity: parsed.severity,
     publicInterestVote: parsed.publicInterestVote,
     confidence: clampConfidence(parsed.confidence),
+    isProceduralVote: parsed.isProceduralVote,
+    legislativeType: parsed.legislativeType,
+    decisionNature: parsed.decisionNature,
+    decisionScope: parsed.decisionScope,
+    voteObjectType: parsed.voteObjectType,
+    voteObjectDescription: parsed.voteObjectDescription,
+    yesMeans: parsed.yesMeans,
+    noMeans: parsed.noMeans,
+    analyzedTextMatchesVoteObject: parsed.analyzedTextMatchesVoteObject,
+    scoreImpactLimit: parsed.scoreImpactLimit,
+    declaredBenefit: parsed.declaredBenefit,
+    hiddenCost: parsed.hiddenCost,
+    netPublicEffect: parsed.netPublicEffect,
+    hasTradeoff: parsed.hasTradeoff,
+    summaryMatchesText: parsed.summaryMatchesText,
+    riskFlags: parsed.riskFlags,
+    criticalArticles: parsed.criticalArticles,
     reason: parsed.reason,
+    source: "llm",
+    analysisLevel: 3,
+    reviewedManually: false,
+    methodologyVersion: VOTE_METHODOLOGY_VERSION,
+    analysisMethodVersion: parsed.analysisMethodVersion,
+    analysisPayload: parsed as Record<string, unknown>,
+  });
+  return { ...result, analysisPayload: parsed as Record<string, unknown> };
+}
+
+async function generateJsonResult<T>(params: {
+  provider: ReturnType<typeof getProvider>;
+  model: string;
+  prompt: string;
+  parse: (text: string) => T;
+  label: string;
+}) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const prompt = attempt === 0
+      ? params.prompt
+      : `${params.prompt}
+
+A resposta anterior não foi JSON válido. Responda agora SOMENTE com o objeto JSON solicitado, sem introdução, sem "Entendido", sem markdown e sem comentários fora do JSON.`;
+    const response = await params.provider.generateContent(
+      truncatePrompt(prompt, params.model),
+      { model: params.model, temperature: 0.1, responseMimeType: "application/json" },
+    );
+    try {
+      return params.parse(response);
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0) {
+        console.log(`  ⚠ Resposta fora do JSON em ${params.label}; tentando corrigir uma vez.`);
+        continue;
+      }
+      throw new Error(
+        `${params.label}: resposta não foi JSON válido após retry (${errorMessage(lastError)}). Trecho: ${shortText(response, 140)}`,
+      );
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+function jsonArray<T>(value: T[] | undefined) {
+  return value && value.length > 0 ? value : [];
+}
+
+function proposalAnalysisColumns(parsed: ProposalLlmResult, fallbackType: LegislativeType) {
+  return {
+    analysis_method_version: parsed.analysisMethodVersion ?? "legislative-impact-v2",
+    legislative_type: parsed.legislativeType ?? fallbackType,
+    decision_nature: parsed.decisionNature ?? "unclear",
+    decision_scope: parsed.decisionScope ?? "unclear",
+    declared_benefit: parsed.declaredBenefit ?? "",
+    hidden_cost: parsed.hiddenCost ?? "",
+    net_public_effect: parsed.netPublicEffect ?? "unclear",
+    has_tradeoff: parsed.hasTradeoff ?? false,
+    summary_matches_text: parsed.summaryMatchesText ?? "unclear",
+    risk_flags: jsonArray(parsed.riskFlags),
+    critical_articles: jsonArray(parsed.criticalArticles),
+    analysis_payload: parsed.analysisPayload ?? parsed,
   };
+}
+
+function voteAnalysisColumns(parsed: VoteLlmResult, fallbackType: LegislativeType, fallbackObjectType: VoteObjectType) {
+  return {
+    analysis_method_version: parsed.analysisMethodVersion ?? "legislative-impact-v2",
+    legislative_type: parsed.legislativeType ?? fallbackType,
+    decision_nature: parsed.decisionNature ?? "unclear",
+    decision_scope: parsed.decisionScope ?? "unclear",
+    vote_object_type: parsed.voteObjectType ?? fallbackObjectType,
+    vote_object_description: parsed.voteObjectDescription ?? "",
+    yes_means: parsed.yesMeans ?? "",
+    no_means: parsed.noMeans ?? "",
+    analyzed_text_matches_vote_object: parsed.analyzedTextMatchesVoteObject ?? "unclear",
+    score_impact_limit: parsed.scoreImpactLimit ?? "low",
+    is_procedural_vote: parsed.isProceduralVote ?? false,
+    declared_benefit: parsed.declaredBenefit ?? "",
+    hidden_cost: parsed.hiddenCost ?? "",
+    net_public_effect: parsed.netPublicEffect ?? "unclear",
+    has_tradeoff: parsed.hasTradeoff ?? false,
+    summary_matches_text: parsed.summaryMatchesText ?? "unclear",
+    risk_flags: jsonArray(parsed.riskFlags),
+    critical_articles: jsonArray(parsed.criticalArticles),
+    analysis_payload: parsed.analysisPayload ?? parsed,
+  };
+}
+
+async function runWithConcurrency<T>(items: T[], concurrency: number, worker: (item: T, index: number) => Promise<void>) {
+  let cursor = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, items.length || 1));
+  async function next() {
+    for (;;) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      await worker(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: workerCount }, next));
 }
 
 async function updateMetricRows(rows: Row[]) {
@@ -566,6 +946,7 @@ async function classifyProposals(params: {
   limit: number;
   provider: ReturnType<typeof getProvider>;
   model: string;
+  concurrency: number;
 }) {
   const metadata = publicValueClassificationMetadata();
   const [proposals, existing] = await Promise.all([
@@ -585,8 +966,7 @@ async function classifyProposals(params: {
   let failed = 0;
 
   console.log(`\nProposições elegíveis: ${candidates.length}; processando ${toProcess.length}`);
-  for (let index = 0; index < toProcess.length; index++) {
-    const proposal = toProcess[index];
+  await runWithConcurrency(toProcess, params.concurrency, async (proposal, index) => {
     const start = performance.now();
     const label = `${proposal.type ?? "Proposição"} ${proposal.number ?? proposal.id}/${proposal.year ?? ""}`.replace(/\/$/, "");
     progressLine({
@@ -603,19 +983,21 @@ async function classifyProposals(params: {
       let fullText: FullTextResult | undefined;
       if (params.level === 3) {
         const result = await getFullTextForProposal(Number(proposal.id));
-        if (!result) {
-          const elapsedMs = recordDuration(recentDurations, start);
-          console.log(`  ⚠ Sem inteiro teor, pulando nível 3 (${formatEta(elapsedMs)})`);
-          continue;
+        if (result) {
+          fullText = result;
+          console.log(`  Inteiro teor: ${result.wordCount} palavras, ~${result.tokenEstimate} tokens (${result.fromCache ? "cache" : "baixado"})`);
+        } else {
+          console.log("  ⚠ Sem inteiro teor; análise N3 será limitada e conservadora");
         }
-        fullText = result;
-        console.log(`  Inteiro teor: ${result.wordCount} palavras, ~${result.tokenEstimate} tokens (${result.fromCache ? "cache" : "baixado"})`);
       }
-      const response = await params.provider.generateContent(
-        truncatePrompt(proposalPrompt(proposal, params.level, fullText), params.model),
-        { model: params.model, temperature: 0.1, responseMimeType: "application/json" },
-      );
-      const parsed = parseProposalResult(response);
+      const parsed = await generateJsonResult({
+        provider: params.provider,
+        model: params.model,
+        prompt: proposalPrompt(proposal, params.level, fullText),
+        parse: parseProposalResult,
+        label,
+      });
+      const fallbackType = inferLegislativeType(`${proposal.type ?? ""} ${proposal.summary ?? ""}`);
       await upsertBatches("proposal_classifications", [{
         proposal_id: proposal.id,
         category: parsed.category,
@@ -624,6 +1006,7 @@ async function classifyProposals(params: {
         source: "llm",
         analysis_level: params.level,
         methodology_version: metadata.methodologyVersion,
+        ...proposalAnalysisColumns(parsed, fallbackType),
         updated_at: new Date().toISOString(),
       }], "proposal_id");
       updatedProposalIds.push(proposal.id);
@@ -637,8 +1020,8 @@ async function classifyProposals(params: {
       console.log(`  ✗ Falha: ${errorMessage(error).substring(0, 120)}`);
       console.log(`  Tempo do item: ${formatEta(elapsedMs)}`);
     }
-    if (index < toProcess.length - 1) await sleep(DEFAULT_DELAY_MS);
-  }
+    if (params.concurrency === 1 && index < toProcess.length - 1) await sleep(DEFAULT_DELAY_MS);
+  });
 
   const metricRows = await updateProposalMetrics(updatedProposalIds);
   return { classified: updatedProposalIds.length, failed, skipped: toProcess.length - updatedProposalIds.length - failed, metricRows };
@@ -650,6 +1033,7 @@ async function classifyVotes(params: {
   limit: number;
   provider: ReturnType<typeof getProvider>;
   model: string;
+  concurrency: number;
 }) {
   const [votes, existing] = await Promise.all([
     fetchAll<VoteRow>("votes", "id, vote_date, description, summary, url, session_number"),
@@ -667,8 +1051,7 @@ async function classifyVotes(params: {
   let failed = 0;
 
   console.log(`\nVotações elegíveis: ${candidates.length}; processando ${toProcess.length}`);
-  for (let index = 0; index < toProcess.length; index++) {
-    const vote = toProcess[index];
+  await runWithConcurrency(toProcess, params.concurrency, async (vote, index) => {
     const start = performance.now();
     progressLine({
       index,
@@ -684,46 +1067,70 @@ async function classifyVotes(params: {
       let fullText: FullTextResult | undefined;
       if (params.level === 3) {
         const result = await getFullTextForVote(vote.id);
-        if (!result) {
-          const elapsedMs = recordDuration(recentDurations, start);
-          console.log(`  ⚠ Sem inteiro teor, pulando nível 3 (${formatEta(elapsedMs)})`);
-          continue;
+        if (result) {
+          fullText = result;
+          console.log(`  Inteiro teor: proposição #${result.proposicaoId}, ${result.wordCount} palavras, ~${result.tokenEstimate} tokens (${result.fromCache ? "cache" : "baixado"})`);
+        } else {
+          console.log("  ⚠ Sem inteiro teor; análise N3 será limitada e conservadora");
         }
-        fullText = result;
-        console.log(`  Inteiro teor: proposição #${result.proposicaoId}, ${result.wordCount} palavras, ~${result.tokenEstimate} tokens (${result.fromCache ? "cache" : "baixado"})`);
       }
-      const response = await params.provider.generateContent(
-        truncatePrompt(votePrompt(vote, params.level, fullText), params.model),
-        { model: params.model, temperature: 0.1, responseMimeType: "application/json" },
-      );
-      const parsed = parseVoteResult(response);
+      const parsed = await generateJsonResult({
+        provider: params.provider,
+        model: params.model,
+        prompt: votePrompt(vote, params.level, fullText),
+        parse: parseVoteResult,
+        label: vote.id,
+      });
+      const fallbackType = inferLegislativeType(`${vote.description ?? ""} ${vote.summary ?? ""}`);
+      const fallbackObjectType = inferVoteObjectType(vote.description);
       const analysis: PublicVoteAnalysis = {
         voteId: vote.id,
         classification: parsed.classification,
         severity: parsed.severity,
         publicInterestVote: parsed.publicInterestVote,
         confidence: parsed.confidence,
+        isProceduralVote: parsed.isProceduralVote,
+        legislativeType: parsed.legislativeType ?? fallbackType,
+        decisionNature: parsed.decisionNature,
+        decisionScope: parsed.decisionScope,
+        voteObjectType: parsed.voteObjectType ?? fallbackObjectType,
+        voteObjectDescription: parsed.voteObjectDescription,
+        yesMeans: parsed.yesMeans,
+        noMeans: parsed.noMeans,
+        analyzedTextMatchesVoteObject: parsed.analyzedTextMatchesVoteObject,
+        scoreImpactLimit: parsed.scoreImpactLimit,
+        declaredBenefit: parsed.declaredBenefit,
+        hiddenCost: parsed.hiddenCost,
+        netPublicEffect: parsed.netPublicEffect,
+        hasTradeoff: parsed.hasTradeoff,
+        summaryMatchesText: parsed.summaryMatchesText,
+        riskFlags: parsed.riskFlags,
+        criticalArticles: parsed.criticalArticles,
         reason: parsed.reason,
         source: "llm",
         analysisLevel: params.level,
         reviewedManually: false,
         methodologyVersion: VOTE_METHODOLOGY_VERSION,
+        analysisMethodVersion: parsed.analysisMethodVersion,
+        analysisPayload: parsed.analysisPayload,
       };
+      const normalized = normalizeVoteAnalysis(analysis);
       await upsertBatches("vote_classifications", [{
         vote_id: vote.id,
         session_number: vote.session_number ?? sessionNumberFromVoteId(vote.id),
-        classification: analysis.classification,
-        severity: analysis.severity,
-        public_interest_vote: analysis.publicInterestVote,
-        confidence: analysis.confidence,
-        reason: analysis.reason,
+        classification: normalized.classification,
+        severity: normalized.severity,
+        public_interest_vote: normalized.publicInterestVote,
+        confidence: normalized.confidence,
+        reason: normalized.reason,
         source: "llm",
         analysis_level: params.level,
         reviewed_manually: false,
-        methodology_version: analysis.methodologyVersion,
+        methodology_version: normalized.methodologyVersion,
+        ...voteAnalysisColumns(parsed, fallbackType, fallbackObjectType),
         updated_at: new Date().toISOString(),
       }], "vote_id,session_number");
-      analyses.set(vote.id, analysis);
+      analyses.set(vote.id, normalized);
       const elapsedMs = recordDuration(recentDurations, start);
       console.log(`  ✓ Classificação: ${parsed.classification} | Severidade: ${parsed.severity} | Voto público: ${parsed.publicInterestVote}`);
       console.log(`  Justificativa: ${shortText(parsed.reason)}`);
@@ -734,8 +1141,8 @@ async function classifyVotes(params: {
       console.log(`  ✗ Falha: ${errorMessage(error).substring(0, 120)}`);
       console.log(`  Tempo do item: ${formatEta(elapsedMs)}`);
     }
-    if (index < toProcess.length - 1) await sleep(DEFAULT_DELAY_MS);
-  }
+    if (params.concurrency === 1 && index < toProcess.length - 1) await sleep(DEFAULT_DELAY_MS);
+  });
 
   const affectedPairs = await updateLegislatorVotes(analyses);
   const metricRows = await updateVoteMetrics(affectedPairs);
@@ -764,12 +1171,13 @@ async function selectLevel(rl: Wizard, configMode: AnalysisMode) {
   const fallback = configMode === "advanced" ? "3" : "2";
   console.log("\nNível de análise:");
   console.log("  2) IA com resumo/descrição");
-  console.log("  3) IA com inteiro teor");
+  console.log("  3) Auditoria N3 · efeito líquido + objeto votado");
   const answer = await question(rl, `Escolha [${fallback}]: `);
   return (answer || fallback) === "3" ? 3 : 2;
 }
 
-async function selectScope(rl: Wizard) {
+async function selectScope(rl: Wizard, counts?: EligibilityCounts, target?: ClassifyTarget) {
+  if (counts && target) printEligibilityCounts(target, counts);
   console.log("\nEscopo:");
   console.log("  1) Pendentes/melhoráveis — respeita a precedência dos níveis");
   console.log("  2) Sobrescrever — reprocessa classificações do mesmo nível ou inferior");
@@ -783,11 +1191,18 @@ async function selectLimit(rl: Wizard) {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_LIMIT;
 }
 
+async function selectConcurrency(rl: Wizard) {
+  const answer = await question(rl, `\nProcessos simultâneos [${DEFAULT_CONCURRENCY}]: `);
+  const parsed = Number(answer || DEFAULT_CONCURRENCY);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_CONCURRENCY;
+}
+
 async function confirmRun(rl: Wizard, params: {
   target: ClassifyTarget;
   level: AnalysisLevel;
   scope: ClassifyScope;
   limit: number;
+  concurrency: number;
   providerName: string;
   model: string;
 }) {
@@ -796,7 +1211,11 @@ async function confirmRun(rl: Wizard, params: {
   console.log(`  Nível: ${params.level}`);
   console.log(`  Escopo: ${params.scope === "overwrite" ? "Sobrescrever mesmo nível/inferior" : "Pendentes/melhoráveis"}`);
   console.log(`  Limite por alvo: ${params.limit}`);
+  console.log(`  Processos simultâneos: ${params.concurrency}`);
   console.log(`  Provedor/modelo: ${params.providerName} / ${params.model}`);
+  if (params.providerName === "OpenAI" && params.concurrency > 3) {
+    console.log("  ⚠ OpenAI com mais de 3 processos simultâneos aumenta bastante o risco de 429. Recomendado: 2 ou 3.");
+  }
   const answer = await question(rl, "Executar e gravar no Supabase? [s/N]: ");
   return answer.toLocaleLowerCase("pt-BR") === "s";
 }
@@ -806,8 +1225,11 @@ async function main() {
   const firstRl = createInterface({ input: process.stdin, output: process.stdout });
   const target = await selectTarget(firstRl, config.lastTarget);
   const level = await selectLevel(firstRl, config.lastMode);
-  const scope = await selectScope(firstRl);
+  if (level === 3) await assertLegislativeImpactSchema();
+  const counts = await getEligibilityCounts(level);
+  const scope = await selectScope(firstRl, counts, target);
   const limit = await selectLimit(firstRl);
+  const concurrency = await selectConcurrency(firstRl);
   firstRl.close();
 
   const selection = await interactiveSelect(config, "classificar");
@@ -818,6 +1240,7 @@ async function main() {
     level,
     scope,
     limit,
+    concurrency,
     providerName: selection.provider.name,
     model: selection.model,
   });
@@ -838,7 +1261,7 @@ async function main() {
     proposals: { classified: 0, failed: 0, skipped: 0, metricRows: 0 },
     votes: { classified: 0, failed: 0, skipped: 0, metricRows: 0, linksUpdated: 0 },
   };
-  const runParams = { level, scope, limit, provider: selection.provider, model: selection.model };
+  const runParams = { level, scope, limit, concurrency, provider: selection.provider, model: selection.model };
 
   if (target === "votes" || target === "both") {
     stats.votes = await classifyVotes(runParams);
