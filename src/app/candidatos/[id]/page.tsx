@@ -49,7 +49,6 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  getDeputy,
   getDeputies,
   getFullSnapshot,
   getProfileDetails,
@@ -113,7 +112,8 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { id } = await params;
-  const deputy = await getDeputy(id);
+  const snapshot = await getFullSnapshot();
+  const deputy = snapshot.deputies.find((item) => item.slug === id);
   return {
     title: deputy?.name ?? "Deputado",
     description: deputy
@@ -124,11 +124,11 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function DeputyPage({ params, searchParams }: PageProps) {
   const { id } = await params;
-  const deputy = await getDeputy(id);
+  const snapshot = await getFullSnapshot();
+  const deputy = snapshot.deputies.find((item) => item.slug === id);
   if (!deputy) notFound();
 
   const context = await searchParams;
-  const snapshot = await getFullSnapshot();
   const metadata = await getSnapshotMetadata();
 
   const index: RankingIndex = "public-value";

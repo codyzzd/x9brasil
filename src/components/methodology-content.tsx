@@ -5,8 +5,6 @@ import {
   Calculator,
   CheckCircle2,
   CircleHelp,
-  ClipboardCheck,
-  FileSearch,
   Gauge,
   Layers,
   Lightbulb,
@@ -88,37 +86,6 @@ function QuickFact({
   );
 }
 
-function AnalysisLevel({
-  icon: Icon,
-  label,
-  title,
-  text,
-}: {
-  icon: LucideIcon;
-  label: string;
-  title: string;
-  text: string;
-}) {
-  return (
-    <div className="rounded-md bg-muted/60 p-3">
-      <div className="flex items-start gap-3">
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background text-blue-700 shadow-xs dark:text-blue-300">
-          <Icon className="size-4" />
-        </span>
-        <div>
-          <p className="text-xs font-semibold uppercase text-blue-700 dark:text-blue-300">
-            {label}
-          </p>
-          <p className="font-medium text-foreground">{title}</p>
-        </div>
-      </div>
-      <p className="mt-2 text-xs leading-5 text-muted-foreground text-pretty">
-        {text}
-      </p>
-    </div>
-  );
-}
-
 function PercentileCard() {
   return (
     <div className="rounded-lg border bg-card p-4 text-sm leading-6 text-muted-foreground">
@@ -196,8 +163,8 @@ function PublicValueSection({
             />
             <QuickFact
               icon={Layers}
-              title="Cobertura por níveis"
-              text="N1, N2 e N3 indicam profundidade da análise."
+              title="Dados analisados"
+              text="A tarja mostra quanto da base pública já recebeu análise."
             />
             <QuickFact
               icon={CircleHelp}
@@ -213,52 +180,23 @@ function PublicValueSection({
       <div className="rounded-lg border bg-card">
         <div className="border-b px-4 py-3">
           <p className="flex items-center gap-2 font-semibold">
-            <Layers className="size-4 text-muted-foreground" /> Cobertura e profundidade da análise
+            <Layers className="size-4 text-muted-foreground" /> Dados públicos analisados
           </p>
           <p className="text-xs text-muted-foreground">
-            A tarja superior resume quanto da base já foi analisada.
+            A tarja superior resume a parcela da base pública já analisada.
           </p>
         </div>
         <div className="space-y-3 p-4 text-sm leading-6 text-muted-foreground">
           <p>
-            <strong className="font-medium text-foreground">Cobertura</strong>{" "}
-            é a parcela de proposições e votações que já recebeu alguma
-            classificação no banco. Os percentuais N1, N2 e N3 mostram a
-            profundidade dessa análise.
-          </p>
-          <div className="grid gap-3 md:grid-cols-3">
-            <AnalysisLevel
-              icon={ClipboardCheck}
-              label="N1"
-              title="Automático"
-              text="Regras objetivas identificam casos evidentes por texto: homenagem, transparência, saúde, educação ou privilégio político."
-            />
-            <AnalysisLevel
-              icon={FileSearch}
-              label="N2"
-              title="Assistido por IA"
-              text="Em teste. Usa ementa, descrição e resumo para classificar casos que precisam de mais contexto."
-            />
-            <AnalysisLevel
-              icon={Layers}
-              label="N3"
-              title="Auditoria segura"
-              text="Em teste. Usa triagem mini-first para pontuar apenas casos seguros; casos ambíguos ficam pendentes para revisão forte."
-            />
-          </div>
-          <p>
-            A ordem de prioridade é N3, depois N2 e depois N1. Assim, uma
-            análise mais profunda não é substituída por uma análise mais rasa
-            quando novos syncs ou reprocessamentos rodam. Itens pendentes não
-            recebem nota zero; eles simplesmente ficam fora das partes do
-            cálculo que dependem de classificação.
+            <strong className="font-medium text-foreground">Dados públicos analisados</strong>{" "}
+            é a parcela de proposições e votações que já recebeu classificação
+            no banco. A análise pode vir de regras automáticas simples ou de IA
+            aplicada a votações e proposições.
           </p>
           <p>
-            No N3 v4, votações sobre emenda, destaque, substitutivo, votação em
-            separado ou procedimento recebem travas adicionais: se o texto
-            específico do objeto votado não foi encontrado, se a análise usou
-            apenas o projeto relacionado como evidência principal, ou se o mini
-            detectou risco alto, o caso fica pendente e não altera o score.
+            Itens pendentes não recebem nota zero; eles simplesmente ficam fora
+            das partes do cálculo que dependem de classificação até que sejam
+            analisados.
           </p>
         </div>
       </div>

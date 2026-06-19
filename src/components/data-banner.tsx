@@ -1,34 +1,29 @@
 import { getDataBannerStats } from "@/lib/db";
 
 export async function DataBanner() {
-  const stats = await getDataBannerStats();
+  const stats = await getBannerStats();
+  if (!stats) return null;
 
   return (
     <div className="w-full border-b border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
       <div className="flex min-h-9 items-center gap-2 overflow-x-auto px-3 py-1.5 text-xs whitespace-nowrap sm:justify-center sm:text-sm">
         <MetricPill
-          label="Cobertura"
+          label="Dados públicos analisados"
           value={formatPercent(stats.coveragePercent)}
-          title={`${formatInteger(stats.classifiedItems)} de ${formatInteger(stats.totalItems)} itens analisáveis classificados`}
-        />
-        <MetricPill
-          label="N1"
-          value={formatPercent(stats.levels.level1.percent)}
-          title={`${formatInteger(stats.levels.level1.count)} itens com análise nível 1`}
-        />
-        <MetricPill
-          label="N2"
-          value={formatPercent(stats.levels.level2.percent)}
-          title={`${formatInteger(stats.levels.level2.count)} itens com análise nível 2`}
-        />
-        <MetricPill
-          label="N3"
-          value={formatPercent(stats.levels.level3.percent)}
-          title={`${formatInteger(stats.levels.level3.count)} itens com análise nível 3`}
+          title={`${formatInteger(stats.classifiedItems)} de ${formatInteger(stats.totalItems)} proposições e votações já analisadas`}
         />
       </div>
     </div>
   );
+}
+
+async function getBannerStats() {
+  try {
+    return await getDataBannerStats();
+  } catch (error) {
+    console.error("Failed to render data banner", error);
+    return null;
+  }
 }
 
 function MetricPill({

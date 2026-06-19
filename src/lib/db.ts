@@ -52,13 +52,22 @@ async function fetchAllRows<T>(
     data: T[] | null;
     error: unknown;
   }>,
+  context = "unknown query",
 ): Promise<T[]> {
   const rows: T[] = [];
 
   for (let from = 0; ; from += SUPABASE_PAGE_SIZE) {
     const to = from + SUPABASE_PAGE_SIZE - 1;
     const { data, error } = await query(from, to);
-    if (error) throw error;
+    if (error) {
+      console.error("Supabase paginated fetch failed", {
+        context,
+        from,
+        to,
+        error,
+      });
+      throw error;
+    }
 
     rows.push(...(data ?? []));
 
@@ -169,18 +178,21 @@ export async function getFullSnapshot(): Promise<RankingSnapshot> {
     getPeriods(),
     fetchAllRows<Record<string, unknown>>((from, to) =>
       supabase.from("legislator_period_metrics").select("*").range(from, to),
+      "legislator_period_metrics",
     ),
     fetchAllRows<Record<string, unknown>>((from, to) =>
       supabase
         .from("legislator_period_top_donors")
         .select("legislator_id, period_id, name, value")
         .range(from, to),
+      "legislator_period_top_donors",
     ),
     fetchAllRows<Record<string, unknown>>((from, to) =>
       supabase
         .from("legislator_period_top_campaign_suppliers")
         .select("legislator_id, period_id, name, value")
         .range(from, to),
+      "legislator_period_top_campaign_suppliers",
     ),
   ]);
 
@@ -277,6 +289,7 @@ export async function getDeputies(): Promise<DeputyIdentity[]> {
       .select("id, slug, name, civil_name, photo_url, chamber_url, election_number, tse_sequence, election_status, assets_total, assets_count")
       .order("name")
       .range(from, to),
+    "legislators",
   );
 
   return data.map((row: Record<string, unknown>) => ({
@@ -397,18 +410,21 @@ export async function getPeriodMetrics(periodId: string): Promise<PeriodDeputyRe
       .select("*")
       .eq("period_id", periodId)
       .range(from, to),
+      `legislator_period_metrics:${periodId}`,
     ),
     fetchAllRows<Record<string, unknown>>((from, to) => supabase
       .from("legislator_period_top_donors")
       .select("legislator_id, name, value")
       .eq("period_id", periodId)
       .range(from, to),
+      `legislator_period_top_donors:${periodId}`,
     ),
     fetchAllRows<Record<string, unknown>>((from, to) => supabase
       .from("legislator_period_top_campaign_suppliers")
       .select("legislator_id, name, value")
       .eq("period_id", periodId)
       .range(from, to),
+      `legislator_period_top_campaign_suppliers:${periodId}`,
     ),
   ]);
 
