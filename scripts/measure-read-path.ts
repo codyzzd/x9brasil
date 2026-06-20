@@ -1,20 +1,17 @@
 import { loadEnvConfig } from "@next/env";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "../src/lib/database/client";
 
 loadEnvConfig(process.cwd());
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const DATABASE_URL = process.env.DATABASE_URL;
 const PAGE_SIZE = 1000;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables");
+if (!DATABASE_URL) {
+  console.error("Missing DATABASE_URL environment variable");
   process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-  auth: { autoRefreshToken: false, persistSession: false },
-});
+const supabase = createClient();
 
 type SupabaseSelectQuery = ReturnType<ReturnType<typeof supabase.from>["select"]>;
 

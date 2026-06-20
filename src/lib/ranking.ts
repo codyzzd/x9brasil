@@ -245,6 +245,16 @@ export type PublicValueRankedDeputy = DeputyRecord & {
   labels: string[];
 };
 
+export type PartyRankedRecord = {
+  party: string;
+  rank: number | null;
+  eligible: boolean;
+  score: number | null;
+  dimensions: PublicValueDimensions;
+  deputiesTotal: number;
+  deputiesRanked: number;
+};
+
 export type RankingIndex = "current" | "public-value";
 export type RankingComparison = "legislature-start" | "previous-year";
 
@@ -385,8 +395,92 @@ export function searchRankedDeputies<
   );
 }
 
+export function calculatePartyRankingForPeriod(
+  snapshot: RankingSnapshot,
+  periodId: string,
+) {
+  return calculatePartyRanking(
+    calculatePublicValueRanking(materializePeriod(snapshot, periodId)),
+  );
+}
+
+export function calculatePartyRanking(
+  deputies: PublicValueRankedDeputy[],
+): PartyRankedRecord[] {
+  const groups = new Map<string, PublicValueRankedDeputy[]>();
+  for (const deputy of deputies) {
+    const group = groups.get(deputy.party) ?? [];
+    group.push(deputy);
+    groups.set(deputy.party, group);
+  }
+
+  const records = Array.from(groups.entries()).map<PartyRankedRecord>(
+    ([party, partyDeputies]) => {
+      const rankedDeputies = partyDeputies.filter(
+        (deputy) => deputy.eligible && deputy.score !== null,
+      );
+
+      return {
+        party,
+        rank: null,
+        eligible: rankedDeputies.length > 0,
+        score: average(
+          rankedDeputies.map((deputy) => deputy.score),
+        ),
+        dimensions: {
+          participation: average(
+            rankedDeputies.map((deputy) => deputy.dimensions.participation),
+          ),
+          contribution: average(
+            rankedDeputies.map((deputy) => deputy.dimensions.contribution),
+          ),
+          publicVotes: average(
+            rankedDeputies.map((deputy) => deputy.dimensions.publicVotes),
+          ),
+          efficiency: average(
+            rankedDeputies.map((deputy) => deputy.dimensions.efficiency),
+          ),
+          campaignFinance: average(
+            rankedDeputies.map((deputy) => deputy.dimensions.campaignFinance),
+          ),
+        },
+        deputiesTotal: partyDeputies.length,
+        deputiesRanked: rankedDeputies.length,
+      };
+    },
+  );
+
+  const eligible = records
+    .filter((party) => party.eligible && party.score !== null)
+    .sort(
+      (a, b) =>
+        (b.score ?? 0) - (a.score ?? 0) ||
+        a.party.localeCompare(b.party, "pt-BR"),
+    );
+  eligible.forEach((party, index) => {
+    party.rank = index + 1;
+  });
+
+  return [
+    ...eligible,
+    ...records
+      .filter((party) => !party.eligible)
+      .sort((a, b) => a.party.localeCompare(b.party, "pt-BR")),
+  ];
+}
+
 function clamp(value: number, min = 0, max = 100) {
   return Math.min(max, Math.max(min, value));
+}
+
+function average(values: Array<number | null | undefined>) {
+  const present = values.filter(
+    (value): value is number => value !== null && value !== undefined,
+  );
+  if (present.length === 0) return null;
+  return Math.round(
+    present.reduce((sum, value) => sum + value, 0) / present.length,
+  );
 }
 
 function perMonth(value: number | null, months: number) {

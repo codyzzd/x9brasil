@@ -94,13 +94,14 @@ export function RankingTable({
                 centered
               />
               <SortableHead
-                className="w-[38%]"
+                className="w-[26%]"
                 label="Deputado"
                 value="name"
                 order={order}
                 direction={direction}
                 onOrderChange={onOrderChange}
               />
+              <TableHead className="w-28 text-center">Mandato</TableHead>
               <SortableHead
                 className="w-28"
                 label="Score"
@@ -128,6 +129,9 @@ export function RankingTable({
                     href={`/candidatos/${deputy.slug}${contextQuery}`}
                     compact
                   />
+                </TableCell>
+                <TableCell className="text-center">
+                  <MandateTime months={deputy.metrics.monthsInOffice} />
                 </TableCell>
                 <TableCell className="text-center">
                   <SemanticScore value={deputy.score} index={index} compact />
@@ -159,8 +163,9 @@ export function RankingTable({
               </div>
               <SemanticScore value={deputy.score} index={index} compact />
             </div>
-            <div className="mt-3 pl-11">
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 pl-11">
               <RankTrend change={rankChanges.get(deputy.id)} />
+              <MandateTime months={deputy.metrics.monthsInOffice} inline />
             </div>
             <DimensionSummary deputy={deputy} index={index} className="mt-5" />
           </article>
@@ -331,6 +336,42 @@ function SortableHead({
         />
       </button>
     </TableHead>
+  );
+}
+
+function MandateTime({
+  months,
+  inline = false,
+}: {
+  months: number;
+  inline?: boolean;
+}) {
+  const roundedMonths = Math.max(0, Math.round(months));
+  const label = roundedMonths === 1 ? "mês" : "meses";
+  const accessibleLabel = `${roundedMonths} ${label} no período`;
+
+  if (inline) {
+    return (
+      <span
+        className="inline-flex items-baseline gap-1 text-[10px] text-muted-foreground"
+        aria-label={accessibleLabel}
+      >
+        <span className="font-medium tabular-nums text-foreground">
+          {roundedMonths}
+        </span>
+        {" "}
+        <span>{label} no período</span>
+      </span>
+    );
+  }
+
+  return (
+    <div className="leading-tight" aria-label={accessibleLabel}>
+      <p className="text-sm font-semibold tabular-nums">
+        {roundedMonths} {label}
+      </p>
+      <p className="mt-0.5 text-[10px] text-muted-foreground">no período</p>
+    </div>
   );
 }
 

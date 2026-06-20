@@ -1,5 +1,4 @@
 import { loadEnvConfig } from "@next/env";
-import { createClient } from "@supabase/supabase-js";
 import {
   PUBLIC_VALUE_CATEGORIES,
   buildPublicVoteRecord,
@@ -14,20 +13,18 @@ import {
   type PublicVoteAnalysis,
   type ProposalClassification,
 } from "../src/lib/public-value";
+import { createClient } from "../src/lib/database/client";
 
 loadEnvConfig(process.cwd());
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const DATABASE_URL = process.env.DATABASE_URL;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables");
+if (!DATABASE_URL) {
+  console.error("Missing DATABASE_URL environment variable");
   process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-  auth: { autoRefreshToken: false, persistSession: false },
-});
+const supabase = createClient();
 
 const PAGE_SIZE = 1000;
 const BATCH_SIZE = 500;
@@ -399,7 +396,7 @@ async function updateProposalMetrics(newClassifications: Map<string, ProposalCla
 }
 
 async function main() {
-  console.log("Aplicando nível 1 regex diretamente no Supabase...\n");
+  console.log("Aplicando nível 1 regex diretamente no banco...\n");
 
   const proposalClassifications = await applyProposalRegex();
   console.log(`Proposições cobertas por regex: ${proposalClassifications.size}`);
@@ -413,7 +410,7 @@ async function main() {
 
   console.log("");
   console.log("====================================");
-  console.log("Regex nível 1 aplicado no Supabase");
+  console.log("Regex nível 1 aplicado no banco");
   console.log(`Métricas de proposições recalculadas: ${proposalMetricRows}`);
   console.log(`Métricas de votos recalculadas: ${voteMetricRows}`);
 }

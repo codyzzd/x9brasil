@@ -1,6 +1,6 @@
 import { loadEnvConfig } from "@next/env";
-import { createClient } from "@supabase/supabase-js";
 import { createInterface } from "node:readline/promises";
+import { createClient } from "../src/lib/database/client";
 import {
   PUBLIC_VALUE_CATEGORIES,
   VOTE_METHODOLOGY_VERSION,
@@ -62,17 +62,14 @@ import {
 
 loadEnvConfig(process.cwd());
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const DATABASE_URL = process.env.DATABASE_URL;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables");
+if (!DATABASE_URL) {
+  console.error("Missing DATABASE_URL environment variable");
   process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-  auth: { autoRefreshToken: false, persistSession: false },
-});
+const supabase = createClient();
 
 const PAGE_SIZE = 1000;
 const BATCH_SIZE = 500;
@@ -398,9 +395,9 @@ async function assertClassificationRunSchema() {
   if (!error) return;
   throw new Error(
     [
-      "O Supabase ainda não tem as tabelas de retomada do classificador.",
-      "Aplique a migração supabase/migrations/20260619000001_add_classification_runs.sql antes de rodar o script.",
-      `Erro do Supabase: ${error.message}`,
+      "O banco ainda não tem as tabelas de retomada do classificador.",
+      "Aplique a migration cockroach/migrations/000001_initial_schema.sql antes de rodar o script.",
+      `Erro do banco: ${error.message}`,
     ].join("\n"),
   );
 }
@@ -422,10 +419,9 @@ async function assertLegislativeImpactSchema() {
 
   throw new Error(
     [
-      "O Supabase ainda não tem as colunas principais da metodologia N3.",
-      "Aplique a migração supabase/migrations/20260619000000_add_legislative_impact_v2_analysis.sql antes de rodar nível 3.",
-      "Com o projeto linkado, use: SUPABASE_DB_PASSWORD='senha-do-postgres' supabase db push --linked --yes",
-      `Erro do Supabase: ${error.message}`,
+      "O banco ainda não tem as colunas principais da metodologia N3.",
+      "Aplique a migration cockroach/migrations/000001_initial_schema.sql antes de rodar nível 3.",
+      `Erro do banco: ${error.message}`,
     ].join("\n"),
   );
 }
@@ -2262,7 +2258,7 @@ async function confirmRun(rl: Wizard, params: {
   if (params.providerName === "OpenAI" && params.concurrency > 3) {
     console.log("  ⚠ OpenAI com mais de 3 processos simultâneos aumenta bastante o risco de 429. Recomendado: 2 ou 3.");
   }
-  const answer = await question(rl, "Executar e gravar no Supabase? [s/N]: ");
+  const answer = await question(rl, "Executar e gravar no banco? [s/N]: ");
   return answer.toLocaleLowerCase("pt-BR") === "s";
 }
 
@@ -2415,8 +2411,8 @@ async function main() {
   const elapsedMs = Date.now() - started;
   console.log("\n====================================");
   console.log(postProcessMode === "materialize_only"
-    ? "Materialização de scores concluída no Supabase"
-    : "Classificação LLM gravada diretamente no Supabase");
+    ? "Materialização de scores concluída no banco"
+    : "Classificação LLM gravada diretamente no banco");
   console.log(`${postProcessMode === "materialize_only" ? "Nível selecionado" : "Nível gravado"}: ${level}`);
   console.log(`Tempo total: ${formatEta(elapsedMs)} (${formatCompletionDate(0)})`);
   console.log(`Run: ${finalRun.id.slice(0, 8)} · status ${finalRun.status} · ${finalRun.classified_count}/${finalRun.total_items} classificados · ${finalRun.failed_count} falhas · ${finalRun.pending_count} pendentes`);

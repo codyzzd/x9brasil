@@ -20,27 +20,26 @@ npm start
 
 ## Dados
 
-A aplicação lê dados diretamente do Supabase. Classificações e métricas também
-são gravadas diretamente no Supabase.
+A aplicação lê dados diretamente do CockroachDB/Postgres. Classificações e métricas também
+são gravadas diretamente no banco.
 
 Para entender o caminho completo dos dados, da ingestão nas fontes públicas até
-o Supabase e os níveis de classificação, veja
+o banco e os níveis de classificação, veja
 [`DATA_PIPELINE.md`](./DATA_PIPELINE.md).
 
-### Ingestão direta para Supabase
+### Ingestão direta para o banco
 
-Use `data:supabase:ingest` quando precisar carregar um CSV/ZIP diretamente para
+Use `data:db:ingest` quando precisar carregar um CSV/ZIP diretamente para
 uma tabela de staging ou destino:
 
 ```bash
-npm run data:supabase:ingest -- --file dados.csv --table staging_table
-npm run data:supabase:ingest -- --file dados.zip --zip-entry arquivo.csv --table staging_table
+npm run data:db:ingest -- --file dados.csv --table staging_table
+npm run data:db:ingest -- --file dados.zip --zip-entry arquivo.csv --table staging_table
 ```
 
 Variáveis exigidas:
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+- `DATABASE_URL`
 
 ### Classificação de valor público
 
@@ -78,7 +77,7 @@ Os dados vêm de APIs públicas:
 
 ### Sistema de Classificação de Valor Público
 
-As classificações ficam em tabelas do Supabase e respeitam níveis:
+As classificações ficam em tabelas do banco e respeitam níveis:
 
 1. **Nível 3** — IA com inteiro teor.
 2. **Nível 2** — IA com resumo/descrição.

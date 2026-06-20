@@ -1,7 +1,7 @@
 # Pipeline de dados e classificacoes
 
-Este documento descreve o fluxo operacional atual: os dados entram no Supabase,
-as classificacoes sao gravadas no Supabase e o site le o Supabase. Arquivos
+Este documento descreve o fluxo operacional atual: os dados entram no banco SQL
+CockroachDB/Postgres, as classificacoes sao gravadas no banco e o site le esse banco. Arquivos
 locais podem existir apenas como cache tecnico de download, nunca como fonte de
 verdade de classificacao ou score.
 
@@ -15,14 +15,15 @@ npm run data:regex
 npm run data:classify
 ```
 
-- `data:supabase:ingest` carrega CSV/ZIP em tabelas do banco.
+- `data:db:ingest` carrega CSV/ZIP em tabelas do banco.
+- `data:supabase:ingest` ainda existe como alias de compatibilidade.
 - `data:regex` aplica classificacao nivel 1 por regra deterministica.
-- `data:classify` roda IA nivel 2 ou 3 por wizard e grava direto no Supabase.
+- `data:classify` roda IA nivel 2 ou 3 por wizard e grava direto no banco.
 
 Variaveis exigidas para escrita no banco:
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+- `DATABASE_URL`
+- `DATABASE_POOL_MAX` opcional, padrao `10`
 
 Chaves de IA, quando usadas:
 
@@ -67,7 +68,7 @@ npm run data:regex
 
 O comando:
 
-- le `proposals` e `votes` diretamente do Supabase;
+- le `proposals` e `votes` diretamente do banco;
 - aplica regras de `src/lib/public-value.ts`;
 - grava `source = 'rule'` e `analysis_level = 1`;
 - nao substitui classificacoes nivel 2, nivel 3 ou revisadas;
@@ -84,7 +85,7 @@ No wizard, escolha `Nível 2 · IA com resumo`.
 
 O comando:
 
-- usa ementa, descricao e resumo ja salvos no Supabase;
+- usa ementa, descricao e resumo ja salvos no banco;
 - grava `source = 'llm'` e `analysis_level = 2`;
 - pode substituir nivel 1;
 - nao substitui nivel 3;
@@ -148,11 +149,11 @@ Votacoes:
 
 ```text
 fontes oficiais
-  -> tabelas Supabase
-  -> classificacao nivel 1/2/3 no Supabase
-  -> metricas agregadas no Supabase
-  -> site le Supabase
+  -> tabelas CockroachDB/Postgres
+  -> classificacao nivel 1/2/3 no banco
+  -> metricas agregadas no banco
+  -> site le o banco
 ```
 
 O ponto central: classificacao e score vivem em tabelas normalizadas do
-Supabase, nao em arquivos intermediarios.
+banco SQL, nao em arquivos intermediarios.

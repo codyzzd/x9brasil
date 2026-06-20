@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 import { formatCurrency } from "@/lib/ranking"
-import { DataTable, type Column, type FilterDef } from "@/components/data-table"
+import { DataTable, type Column, type FilterDef, type SortState } from "@/components/data-table"
 
 /* ───── helpers ───── */
 
@@ -316,10 +316,16 @@ export function VotePositioningBar({ data }: { data: PublicVote[] }) {
   )
 }
 
-export function VoteDistributionBar({ data }: { data: PublicVote[] }) {
+export function VoteDistributionBar({
+  data,
+  counts,
+}: {
+  data: PublicVote[]
+  counts?: Record<string, number>
+}) {
   const segments = VOTE_BAR_SEGMENTS.map((s) => ({
     ...s,
-    count: data.filter((v) => v.classification === s.key).length,
+    count: counts?.[s.key] ?? data.filter((v) => v.classification === s.key).length,
   }))
   const total = segments.reduce((sum, s) => sum + s.count, 0)
 
@@ -728,9 +734,13 @@ export function LargestExpensesTable({ data }: { data: LargestExpense[] }) {
 export function PublicVotesTable({
   data,
   controls = true,
+  sortState,
+  onSortChange,
 }: {
   data: PublicVote[]
   controls?: boolean
+  sortState?: SortState
+  onSortChange?: (sort: SortState) => void
 }) {
   const [selected, setSelected] = useState<PublicVote | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -916,6 +926,11 @@ export function PublicVotesTable({
         ]}
         filters={controls ? filters : []}
         emptyMessage="Nenhuma votação nominal encontrada no período."
+        paginationMode={controls ? "client" : "none"}
+        footerMode={controls ? "auto" : "hidden"}
+        sortMode={controls ? "client" : "manual"}
+        sortState={sortState}
+        onSortChange={onSortChange}
         tableClassName="table-fixed"
       />
       <VoteDetailSheet vote={selected} open={sheetOpen} onOpenChange={setSheetOpen} />

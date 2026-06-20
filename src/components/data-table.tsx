@@ -24,6 +24,8 @@ import { cn } from "@/lib/utils"
 
 const DEFAULT_ITEMS_PER_PAGE = 15
 
+export type SortState = { id: string; dir: "asc" | "desc" } | null
+
 export type Column<T> = {
   id: string
   header: string
@@ -51,6 +53,11 @@ export type DataTableProps<T> = {
   filters?: FilterDef<T>[]
   emptyMessage?: string
   itemsPerPage?: number
+  paginationMode?: "client" | "none"
+  footerMode?: "auto" | "hidden"
+  sortMode?: "client" | "manual"
+  sortState?: SortState
+  onSortChange?: (sort: SortState) => void
   tableClassName?: string
 }
 
@@ -64,12 +71,18 @@ export function DataTable<T>({
   filters = [],
   emptyMessage = "Nenhum registro encontrado.",
   itemsPerPage = DEFAULT_ITEMS_PER_PAGE,
+  paginationMode = "client",
+  footerMode = "auto",
+  sortMode = "client",
+  sortState,
+  onSortChange,
   tableClassName,
 }: DataTableProps<T>) {
   const [search, setSearch] = useState("")
   const [page, setPage] = useState(0)
-  const [sort, setSort] = useState<{ id: string; dir: "asc" | "desc" } | null>(null)
+  const [internalSort, setInternalSort] = useState<SortState>(null)
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({})
+  const sort = sortState !== undefined ? sortState : internalSort
 
   const filtered = useMemo(() => {
     let result = data
@@ -92,7 +105,7 @@ export function DataTable<T>({
   }, [data, search, searchFields, filters, activeFilters])
 
   const sorted = useMemo(() => {
-    if (!sort) return filtered
+    if (!sort || sortMode === "manual") return filtered
     const col = columns.find((c) => c.id === sort.id)
     if (!col || !col.sortable) return filtered
 
@@ -108,14 +121,16 @@ export function DataTable<T>({
         : String(vb).localeCompare(String(va), "pt-BR")
     })
     return sorted
-  }, [filtered, sort, columns])
+  }, [filtered, sort, columns, sortMode])
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / itemsPerPage))
   const currentPage = Math.min(page, totalPages - 1)
-  const paginated = sorted.slice(
-    currentPage * itemsPerPage,
-    (currentPage + 1) * itemsPerPage,
-  )
+  const paginated = paginationMode === "client"
+    ? sorted.slice(
+        currentPage * itemsPerPage,
+        (currentPage + 1) * itemsPerPage,
+      )
+    : sorted
 
   function handleSearch(value: string) {
     setSearch(value)
@@ -128,12 +143,20 @@ export function DataTable<T>({
   }
 
   function toggleSort(columnId: string) {
-    setSort((prev) => {
+    const nextSort = (() => {
+      const prev = sort
       if (prev?.id === columnId) {
         return { id: columnId, dir: prev.dir === "asc" ? "desc" : "asc" }
       }
       return { id: columnId, dir: "asc" }
-    })
+    })() satisfies Exclude<SortState, null>
+
+    if (onSortChange) {
+      onSortChange(nextSort)
+      return
+    }
+
+    setInternalSort(nextSort)
   }
 
   if (!data.length) {
@@ -230,6 +253,7 @@ export function DataTable<T>({
         </Table>
       </div>
 
+      {footerMode !== "hidden" && (
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
           {sorted.length} registro{sorted.length !== 1 ? "s" : ""}
@@ -263,6 +287,7 @@ export function DataTable<T>({
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }

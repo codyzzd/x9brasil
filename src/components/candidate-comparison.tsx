@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   ArrowLeftRight,
+  CalendarDays,
   Check,
   Search,
   X,
@@ -430,7 +431,7 @@ function CandidateHero({
           {candidate.party}/{candidate.state} · desde{" "}
           {formatDate(candidate.officeStart)}
         </p>
-        <div className="mt-5 flex items-center gap-4">
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
           <SemanticScore value={candidate.score} index={index} compact />
           <div className="text-left">
             <p className="text-xs text-muted-foreground">Posição no Brasil</p>
@@ -438,9 +439,28 @@ function CandidateHero({
               {candidate.rank ? `${candidate.rank}º` : "Sem posição"}
             </p>
           </div>
+          <MandateBadge months={candidate.monthsInOffice} />
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function MandateBadge({ months }: { months: number }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-left ring-1 ring-black/5 dark:ring-white/10">
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+        <CalendarDays className="size-4" />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-[0.68rem] font-medium uppercase text-muted-foreground">
+          Mandato no período
+        </span>
+        <span className="block text-sm font-semibold tabular-nums text-foreground">
+          {formatMandateMonths(months)}
+        </span>
+      </span>
+    </div>
   );
 }
 
@@ -773,4 +793,9 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat("pt-BR").format(
     new Date(`${value}T12:00:00`),
   );
+}
+
+function formatMandateMonths(value: number) {
+  const months = Math.max(0, Math.round(value));
+  return `${months} ${months === 1 ? "mês" : "meses"}`;
 }

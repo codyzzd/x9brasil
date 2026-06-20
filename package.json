@@ -11,11 +11,13 @@
     "diagnose:read-path": "tsx scripts/measure-read-path.ts",
     "data:regex": "tsx scripts/apply-regex-supabase.ts",
     "data:classify": "tsx scripts/classify.ts",
+    "db:schema:apply": "tsx scripts/apply-cockroach-schema.ts",
+    "db:migrate:supabase": "tsx scripts/migrate-supabase-to-cockroach.ts",
+    "data:db:ingest": "tsx scripts/supabase-ingest.ts",
     "data:supabase:ingest": "tsx scripts/supabase-ingest.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
-    "@supabase/supabase-js": "^2.108.2",
     "adm-zip": "^0.5.17",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

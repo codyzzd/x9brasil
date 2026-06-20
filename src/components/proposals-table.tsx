@@ -37,7 +37,7 @@ import {
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { labelTone } from "@/lib/label-tone"
-import { DataTable, type Column, type FilterDef } from "@/components/data-table"
+import { DataTable, type Column, type FilterDef, type SortState } from "@/components/data-table"
 
 type Proposal = {
   id: string
@@ -436,9 +436,13 @@ function ProposalSheet({
 export function ProposalsTable({
   proposals,
   controls = true,
+  sortState,
+  onSortChange,
 }: {
   proposals: Proposal[]
   controls?: boolean
+  sortState?: SortState
+  onSortChange?: (sort: SortState) => void
 }) {
   const [selected, setSelected] = useState<Proposal | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -609,6 +613,11 @@ export function ProposalsTable({
         ]}
         filters={controls ? filters : []}
         emptyMessage="Nenhuma proposição encontrada no período."
+        paginationMode={controls ? "client" : "none"}
+        footerMode={controls ? "auto" : "hidden"}
+        sortMode={controls ? "client" : "manual"}
+        sortState={sortState}
+        onSortChange={onSortChange}
         tableClassName="table-fixed"
       />
       <ProposalSheet

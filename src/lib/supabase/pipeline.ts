@@ -1,11 +1,3 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/database/client";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-export const supabaseService = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
-});
+export const supabaseService = createClient();

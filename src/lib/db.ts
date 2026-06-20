@@ -61,7 +61,7 @@ async function fetchAllRows<T>(
     const to = from + SUPABASE_PAGE_SIZE - 1;
     const { data, error } = await query(from, to);
     if (error) {
-      console.error("Supabase paginated fetch failed", {
+      console.error("Database paginated fetch failed", {
         context,
         from,
         to,
@@ -1001,7 +1001,9 @@ async function getDeputyProposals(legislatorId: number, periodId: string) {
         .in("proposal_id", proposalIds)
     : { data: [] as Record<string, unknown>[] | null };
 
-  const classMap = new Map((reviewedClassifications ?? []).map((c: Record<string, unknown>) => [c.proposal_id as string, c]));
+  const classMap = new Map<string, Record<string, unknown>>(
+    (reviewedClassifications ?? []).map((c: Record<string, unknown>) => [c.proposal_id as string, c]),
+  );
 
   return data.map((row: Record<string, unknown>) => {
     const proposal = row.proposals as Record<string, unknown> | null;
@@ -1070,10 +1072,26 @@ async function getDeputyProposalsForPeriods(legislatorId: number, periodIds: str
     reviewedClassifications.push(...(chunkRows ?? []));
   }
 
-  const classMap = new Map(reviewedClassifications.map((c: Record<string, unknown>) => [c.proposal_id as string, c]));
+  const classMap = new Map<string, Record<string, unknown>>(
+    reviewedClassifications.map((c: Record<string, unknown>) => [c.proposal_id as string, c]),
+  );
 
   return Array.from(
-    new Map(
+    new Map<string, {
+      id: string;
+      type: string;
+      number: string;
+      year: string;
+      date: string;
+      summary: string;
+      status: string;
+      url: string;
+      participationRole: string;
+      participationLabel: string;
+      proposalNature: string;
+      proposalNatureLabel: string;
+      publicValue?: ReturnType<typeof classifyProposalFull>;
+    }>(
       data.map((row: Record<string, unknown>) => {
         const proposal = row.proposals as Record<string, unknown> | null;
         const summary = (proposal?.summary as string) ?? "";
@@ -1240,7 +1258,7 @@ async function getDeputyVotes(legislatorId: number, periodId: string) {
       };
     })
     .sort(
-      (a, b) =>
+      (a: { classification: string; scoreDelta: number; date: string }, b: { classification: string; scoreDelta: number; date: string }) =>
         Number(b.classification !== "unanalyzed") - Number(a.classification !== "unanalyzed") ||
         Math.abs(b.scoreDelta) - Math.abs(a.scoreDelta) ||
         b.date.localeCompare(a.date),

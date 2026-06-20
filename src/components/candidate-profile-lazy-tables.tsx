@@ -10,6 +10,7 @@ import {
   VotePositioningBar,
 } from "@/components/candidate-data-tables"
 import { Button } from "@/components/ui/button"
+import type { SortState } from "@/components/data-table"
 import { Input } from "@/components/ui/input"
 
 type ProposalRows = Parameters<typeof ProposalsTable>[0]["proposals"]
@@ -26,6 +27,9 @@ type PagedResult<T> = {
   total: number
   page: number
   pageSize: number
+  aggregates?: {
+    voteDistribution?: Record<string, number>
+  }
 }
 
 const PAGE_SIZE = 15
@@ -60,7 +64,8 @@ function loadSection<T>({
   section,
   page,
   search,
-}: LazyTablesProps & { section: Section; page: number; search: string }) {
+  sort,
+}: LazyTablesProps & { section: Section; page: number; search: string; sort?: SortState }) {
   const params = new URLSearchParams({
     periodo: periodId,
     section,
@@ -68,6 +73,10 @@ function loadSection<T>({
     pageSize: String(PAGE_SIZE),
   })
   if (search) params.set("search", search)
+  if (sort) {
+    params.set("sort", sort.id)
+    params.set("dir", sort.dir)
+  }
 
   const key = `${candidateSlug}:${params.toString()}`
   const cached = pageCache.get(key)
@@ -95,6 +104,7 @@ function usePagedSection<T>(
   const [page, setPage] = useState(0)
   const [searchInput, setSearchInput] = useState("")
   const [search, setSearch] = useState("")
+  const [sort, setSort] = useState<SortState>(null)
   const [result, setResult] = useState<PagedResult<T>>({
     rows: [],
     total: 0,
@@ -107,7 +117,7 @@ function usePagedSection<T>(
     if (!enabled) return
     let active = true
 
-    loadSection<T>({ candidateSlug, periodId, section, page, search })
+    loadSection<T>({ candidateSlug, periodId, section, page, search, sort })
       .then((data) => {
         if (!active) return
         setResult(data)
@@ -121,11 +131,16 @@ function usePagedSection<T>(
     return () => {
       active = false
     }
-  }, [candidateSlug, periodId, section, page, search, enabled])
+  }, [candidateSlug, periodId, section, page, search, sort, enabled])
 
   function submitSearch() {
     setPage(0)
     setSearch(searchInput.trim())
+  }
+
+  function handleSortChange(nextSort: SortState) {
+    setPage(0)
+    setSort(nextSort)
   }
 
   return {
@@ -134,6 +149,8 @@ function usePagedSection<T>(
     searchInput,
     setSearchInput,
     submitSearch,
+    sort,
+    setSort: handleSortChange,
     result,
     status,
   }
@@ -235,7 +252,12 @@ export function LazyProposalsTable(props: LazyTablesProps) {
         noun="proposições"
       />
       {state.result.rows.length ? (
-        <ProposalsTable proposals={state.result.rows} controls={false} />
+        <ProposalsTable
+          proposals={state.result.rows}
+          controls={false}
+          sortState={state.sort}
+          onSortChange={state.setSort}
+        />
       ) : (
         <LoadingState label="Nenhuma proposta encontrada no período." />
       )}
@@ -272,9 +294,17 @@ export function LazyPublicVotesTable(props: LazyTablesProps) {
       />
       {state.result.rows.length ? (
         <>
-          <VoteDistributionBar data={state.result.rows} />
+          <VoteDistributionBar
+            data={state.result.rows}
+            counts={state.result.aggregates?.voteDistribution}
+          />
           <div className="mt-5">
-            <PublicVotesTable data={state.result.rows} controls={false} />
+            <PublicVotesTable
+              data={state.result.rows}
+              controls={false}
+              sortState={state.sort}
+              onSortChange={state.setSort}
+            />
           </div>
         </>
       ) : (

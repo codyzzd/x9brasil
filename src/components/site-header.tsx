@@ -12,7 +12,9 @@ import {
 } from "@/components/ui/sheet";
 
 const links = [
-  { href: "/", label: "Ranking" },
+  { href: "/", label: "Início" },
+  { href: "/deputados-federais", label: "Deputados federais" },
+  { href: "/partidos", label: "Partidos" },
   { href: "/comparar", label: "Comparar" },
   { href: "/metodologia", label: "Metodologia" },
   { href: "/fontes", label: "Fontes" },

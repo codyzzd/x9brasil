@@ -1,64 +1,76 @@
-import { RankingBrowser } from "@/components/ranking-browser";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Badge } from "@/components/ui/badge";
-import { getFullSnapshot } from "@/lib/db";
-import { defaultRankingPeriod } from "@/lib/ranking";
+import { Building2, CheckCircle2, Landmark, Lock, MapPinned } from "lucide-react";
+import Link from "next/link";
+import type { ComponentType } from "react";
 
-export default async function Home({
-  searchParams,
-}: {
-  searchParams: Promise<{
-    uf?: string;
-    partido?: string;
-    periodo?: string;
-    comparacao?: string;
-  }>;
-}) {
-  const context = await searchParams;
-  const snapshot = await getFullSnapshot();
+const rankCards = [
+  {
+    title: "Governadores",
+    description:
+      "Ranking estadual exige outra base de governo, orçamento e execução pública.",
+    status: "Em estudo",
+    available: false,
+    icon: Landmark,
+  },
+  {
+    title: "Senadores",
+    description:
+      "Depende de métricas próprias do Senado e integração com outra fonte legislativa.",
+    status: "Em estudo",
+    available: false,
+    icon: Building2,
+  },
+  {
+    title: "Deputados federais",
+    description:
+      "Ranking ativo com Câmara dos Deputados, TSE, votos, proposições e gastos.",
+    status: "Disponível",
+    available: true,
+    href: "/deputados-federais",
+    icon: CheckCircle2,
+  },
+  {
+    title: "Deputados estaduais",
+    description:
+      "Precisa de bases por assembleia legislativa, que variam por estado.",
+    status: "Em estudo",
+    available: false,
+    icon: MapPinned,
+  },
+];
 
-  const initialComparison =
-    context.comparacao === "ano-a-ano" ? "previous-year" : "legislature-start";
-  const periodId = context.periodo || defaultRankingPeriod(snapshot).id;
-  const initialState = context.uf || "all";
-  const initialParty = context.partido || "all";
-
+export default function Home() {
   return (
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
       <main className="flex-1">
-        <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
-          <div className="mb-5 max-w-4xl">
-            <Badge variant="secondary">Dados públicos oficiais</Badge>
-            <h1 className="mt-3 text-3xl font-bold tracking-tight text-balance sm:text-4xl">
-              Ranking de deputados federais
-            </h1>
-            <p className="mt-2 text-muted-foreground text-pretty">
-              Compare participação, contribuição temática, eficiência e
-              transparência na legislatura iniciada em 1º de fevereiro de 2023.
-            </p>
-            <p className="mt-4 max-w-3xl text-sm leading-6 text-muted-foreground text-pretty">
-              O score é comparativo e informativo. Ele não mede ideologia,
-              honestidade ou intenção de voto.
-            </p>
-          </div>
-          <div className="mb-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
-            <span className="font-medium text-muted-foreground">Escala:</span>
-            <Legend color="bg-red-500" label="Muito baixo · 0–39" />
-            <Legend color="bg-orange-500" label="Baixo · 40–59" />
-            <Legend color="bg-amber-500" label="Médio · 60–74" />
-            <Legend color="bg-emerald-400" label="Alto · 75–89" />
-            <Legend color="bg-emerald-500" label="Excelente · 90–100" />
-            <Legend color="bg-muted-foreground" label="Dados indisponíveis" />
-          </div>
-          <RankingBrowser
-            snapshot={snapshot}
-            initialState={initialState}
-            initialParty={initialParty}
-            initialPeriod={periodId}
-            initialComparison={initialComparison}
-          />
+        <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-12 lg:px-8">
+          <section className="mb-10 space-y-6">
+            <div className="max-w-4xl">
+              <Badge variant="secondary">Dados públicos oficiais</Badge>
+              <h1 className="mt-3 text-3xl font-bold tracking-tight text-balance sm:text-4xl">
+                Score Brasil
+              </h1>
+              <p className="mt-3 max-w-3xl text-base leading-7 text-muted-foreground text-pretty">
+                Uma leitura comparativa do desempenho público de políticos a
+                partir de dados oficiais. O ranking ativo hoje é o de deputados
+                federais; os outros cargos aparecem como próximos módulos para
+                manter clara a hierarquia do sistema.
+              </p>
+              <p className="mt-4 max-w-3xl text-sm leading-6 text-muted-foreground text-pretty">
+                O score é comparativo e informativo. Ele não mede ideologia,
+                honestidade ou intenção de voto.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {rankCards.map((card) => (
+                <RankCard key={card.title} {...card} />
+              ))}
+            </div>
+          </section>
         </div>
       </main>
       <SiteFooter />
@@ -66,11 +78,65 @@ export default async function Home({
   );
 }
 
-function Legend({ color, label }: { color: string; label: string }) {
+function RankCard({
+  title,
+  description,
+  status,
+  available,
+  href,
+  icon: Icon,
+}: {
+  title: string;
+  description: string;
+  status: string;
+  available: boolean;
+  href?: string;
+  icon: ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+}) {
+  const content = (
+    <>
+      <div className="flex items-start justify-between gap-3">
+        <span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Icon className="size-5" aria-hidden />
+        </span>
+        <Badge variant={available ? "default" : "secondary"} className="shrink-0">
+          {available ? (
+            status
+          ) : (
+            <span className="inline-flex items-center gap-1">
+              <Lock className="size-3" aria-hidden />
+              {status}
+            </span>
+          )}
+        </Badge>
+      </div>
+      <div className="space-y-2">
+        <h3 className="text-base font-semibold leading-snug">{title}</h3>
+        <p className="text-sm leading-6 text-muted-foreground">{description}</p>
+      </div>
+      <p className="mt-auto text-xs font-medium text-muted-foreground">
+        {available ? "Abrir ranking" : "Ainda não disponível"}
+      </p>
+    </>
+  );
+
+  if (available && href) {
+    return (
+      <Link
+        href={href}
+        className="flex min-h-52 flex-col gap-5 rounded-lg border bg-card p-4 text-card-foreground shadow-xs transition hover:border-primary/40 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        {content}
+      </Link>
+    );
+  }
+
   return (
-    <span className="flex items-center gap-1.5 text-muted-foreground">
-      <span className={`size-2.5 rounded-full ${color}`} aria-hidden="true" />
-      {label}
-    </span>
+    <div
+      className="flex min-h-52 flex-col gap-5 rounded-lg border bg-muted/35 p-4 text-card-foreground opacity-85"
+      aria-disabled="true"
+    >
+      {content}
+    </div>
   );
 }

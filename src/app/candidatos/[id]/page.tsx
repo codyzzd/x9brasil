@@ -78,7 +78,6 @@ import {
   type RawMetrics,
 } from "@/lib/ranking";
 import { PUBLIC_VALUE_DIMENSION_LABELS } from "@/lib/public-value";
-import { getSnapshotMetadata } from "@/lib/db";
 import { scoreStyle } from "@/lib/score-style";
 import { cn } from "@/lib/utils";
 import { labelTone } from "@/lib/label-tone";
@@ -124,7 +123,6 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
   if (!deputy) notFound();
 
   const context = await searchParams;
-  const metadata = await getSnapshotMetadata();
 
   const index: RankingIndex = "public-value";
   const comparison: RankingComparison =
@@ -176,7 +174,6 @@ export default async function DeputyPage({ params, searchParams }: PageProps) {
     previousRanked,
     previousPeriod?.label || null,
   ).get(ranked.id);
-  const classificationMetadata = { methodologyVersion: "1.0.0", reviewedAt: metadata.sources[0]?.updatedAt ?? new Date().toISOString().split("T")[0] };
   const candidateStyle = getCandidateStyle(ranked.metrics);
 
   const back = new URLSearchParams();
@@ -239,16 +236,17 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                         {ranked.electionStatus}
                       </Badge>
                     )}
-                    {candidateStyle && (
-                      <Badge className="h-6 border-purple-200 bg-purple-50 px-2.5 text-purple-700 dark:border-purple-900 dark:bg-purple-950/30 dark:text-purple-400">
-                        {candidateStyle.label}
-                      </Badge>
-                    )}
                   </div>
                   <h1 className="mt-3 text-3xl font-bold tracking-tight text-balance sm:text-4xl">
                     {ranked.name}
                   </h1>
                   <p className="mt-0.5 text-sm text-muted-foreground">{ranked.civilName}</p>
+                  {candidateStyle && (
+                    <CandidateStyleCard
+                      id={candidateStyle.id}
+                      label={candidateStyle.label}
+                    />
+                  )}
                   {ranked.labels.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-1.5">
                       {ranked.labels.map((label) => (
@@ -317,6 +315,9 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                               : "Sem posição"}
                           </p>
                           <ProfileRankTrend change={rankChange} />
+                          <ScoreMandateContext
+                            months={ranked.metrics.monthsInOffice}
+                          />
                         </div>
                         <div className="text-right">
                           <span className={cn("block text-5xl font-bold leading-none tabular-nums", style.text)}>
@@ -364,26 +365,12 @@ periods={periodSelectOrder((await getPeriodOptions()).map(({ id, label }) => ({
                   />
                 </div>
 
-                <p className="rounded-lg bg-muted/60 p-3 text-xs leading-5 text-muted-foreground">
-                    {ranked.metrics.publicClassifiedProposals || 0} de{" "}
-                    {ranked.metrics.publicTotalProposals || 0} proposições
-                    classificadas. Revisado em{" "}
-                    {formatDate(classificationMetadata.reviewedAt)}.
-                  </p>
-
                 <div className="flex gap-2">
                   <Link
                     href={`/comparar?a=${encodeURIComponent(ranked.slug)}&periodo=${encodeURIComponent(period.id)}`}
                     className={cn(buttonVariants({ variant: "outline" }), "flex-1")}
                   >
                     <GitCompareArrows className="size-3.5" /> Comparar
-                  </Link>
-                  <Link
-                    href="/metodologia"
-                    className={cn(buttonVariants({ variant: "ghost", size: "icon" }))}
-                    aria-label="Ver metodologia"
-                  >
-                    <FileCheck2 className="size-4" />
                   </Link>
                 </div>
               </CardContent>
@@ -919,10 +906,12 @@ function ProfileFact({
   icon: Icon,
   label,
   value,
+  detail,
 }: {
   icon: LucideIcon;
   label: string;
   value: string | number;
+  detail?: string;
 }) {
   return (
     <div className="flex min-w-0 items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
@@ -934,9 +923,45 @@ function ProfileFact({
         <span className="block truncate text-sm font-medium text-foreground">
           {value}
         </span>
+        {detail && (
+          <span className="mt-0.5 block truncate text-[0.68rem] text-muted-foreground">
+            {detail}
+          </span>
+        )}
       </span>
     </div>
   );
+}
+
+function CandidateStyleCard({
+  id,
+  label,
+}: {
+  id: string;
+  label: string;
+}) {
+  return (
+    <div className="mt-4 flex max-w-sm items-center gap-3 rounded-lg border border-purple-200 bg-purple-50/70 px-3 py-2.5 text-purple-900 dark:border-purple-900 dark:bg-purple-950/30 dark:text-purple-200">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-white text-purple-700 shadow-xs ring-1 ring-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:ring-purple-900">
+        <CandidateStyleIcon id={id} />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-[0.68rem] font-medium uppercase text-purple-700 dark:text-purple-300">
+          Perfil de atuação
+        </span>
+        <span className="block truncate text-sm font-semibold">{label}</span>
+      </span>
+    </div>
+  );
+}
+
+function CandidateStyleIcon({ id }: { id: string }) {
+  if (id === "propositor") return <FileStack className="size-4" />;
+  if (id === "fiscalizador") return <ShieldCheck className="size-4" />;
+  if (id === "coautor") return <Users className="size-4" />;
+  if (id === "requerente") return <FileCheck2 className="size-4" />;
+  if (id === "votador") return <Vote className="size-4" />;
+  return <BarChart3 className="size-4" />;
 }
 
 function NonScoredInfoDisclosure({
@@ -1255,6 +1280,29 @@ function labelStyle(label: string) {
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("pt-BR").format(new Date(`${value}T12:00:00`));
+}
+
+function formatMandateMonths(value: number) {
+  const months = Math.max(0, Math.round(value));
+  return `${months} ${months === 1 ? "mês" : "meses"}`;
+}
+
+function ScoreMandateContext({ months }: { months: number }) {
+  return (
+    <div className="mt-4 inline-flex items-center gap-2 rounded-lg bg-white/65 px-2.5 py-2 text-left shadow-xs ring-1 ring-black/5 dark:bg-background/50 dark:ring-white/10">
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+        <CalendarDays className="size-4" />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-[0.68rem] font-medium uppercase text-muted-foreground">
+          Mandato no período
+        </span>
+        <span className="block text-sm font-semibold tabular-nums text-foreground">
+          {formatMandateMonths(months)}
+        </span>
+      </span>
+    </div>
+  );
 }
 
 function ProfileRankTrend({ change }: { change?: RankChange }) {

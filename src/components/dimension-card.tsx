@@ -1,13 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, Info } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import type {
   DimensionCardInfo,
   DimensionExplanation,
@@ -19,7 +14,6 @@ import { cn } from "@/lib/utils";
 export function DimensionCard({
   label,
   value,
-  explanation,
   cardInfo,
 }: {
   label: string;
@@ -28,7 +22,6 @@ export function DimensionCard({
   cardInfo: DimensionCardInfo;
 }) {
   const [stepsOpen, setStepsOpen] = useState(false);
-  const [infoOpen, setInfoOpen] = useState(false);
   const style = scoreStyle(value, "public-value");
   const labelText = value !== null ? publicValueScoreLabel(value) : null;
   const pct = value !== null ? value : null;
@@ -40,29 +33,6 @@ export function DimensionCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h3 className="text-lg font-semibold">{label}</h3>
-            <Popover open={infoOpen} onOpenChange={setInfoOpen}>
-              <PopoverTrigger
-                render={
-                  <button
-                    type="button"
-                    className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    aria-label={`Entenda ${explanation.title}`}
-                    aria-expanded={infoOpen}
-                  >
-                    <Info className="size-3.5" />
-                  </button>
-                }
-              />
-              <PopoverContent side="top" align="start" className="max-w-80 text-xs leading-relaxed">
-                <p className="font-semibold mb-1">{explanation.title}</p>
-                <p className="text-muted-foreground">{explanation.description}</p>
-                {explanation.details.map((detail) => (
-                  <p key={detail} className="mt-1 text-muted-foreground before:content-['•_'] before:opacity-50">
-                    {detail}
-                  </p>
-                ))}
-              </PopoverContent>
-            </Popover>
           </div>
           {cardInfo.subtitle && (
             <p className="mt-0.5 text-sm text-muted-foreground">

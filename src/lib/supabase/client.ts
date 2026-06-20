@@ -1,6 +1,6 @@
-import { createClient } from "@supabase/supabase-js";
+import "server-only";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+import { createClient, db } from "@/lib/database/client";
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = db;
+export { createClient };

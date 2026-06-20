@@ -25,6 +25,7 @@ export type ComparisonCandidate = {
   party: string;
   state: string;
   officeStart: string;
+  monthsInOffice: number;
   score: number | null;
   rank: number | null;
   dimensions: Array<{
@@ -84,6 +85,7 @@ export function buildComparisonCandidate(
     party: ranked.party,
     state: ranked.state,
     officeStart: ranked.officeStart,
+    monthsInOffice: months,
     score: ranked.score,
     rank: ranked.rank,
     dimensions:

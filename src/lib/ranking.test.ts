@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  calculatePartyRanking,
+  calculatePartyRankingForPeriod,
   calculatePublicValueRanking,
   calculateRanking,
   calculateRankChanges,
@@ -13,6 +15,7 @@ import {
   searchRankedDeputies,
   scoreBand,
   type DeputyRecord,
+  type PublicValueRankedDeputy,
   type RankingSnapshot,
 } from "./ranking";
 import { PUBLIC_VALUE_WEIGHTS } from "./public-value";
@@ -68,6 +71,35 @@ const deputy = (
     fiscalizationProposals: id,
     ...overrides,
   },
+});
+
+const rankedDeputy = ({
+  id,
+  party,
+  score,
+  eligible = true,
+  dimensions = {},
+}: {
+  id: number;
+  party: string;
+  score: number | null;
+  eligible?: boolean;
+  dimensions?: Partial<PublicValueRankedDeputy["dimensions"]>;
+}): PublicValueRankedDeputy => ({
+  ...deputy(id),
+  party,
+  rank: score === null ? null : id,
+  eligible,
+  score,
+  dimensions: {
+    participation: 50,
+    contribution: 50,
+    publicVotes: 50,
+    efficiency: 50,
+    campaignFinance: 50,
+    ...dimensions,
+  },
+  labels: [],
 });
 
 test("uses conservative weights for all score dimensions", () => {
@@ -195,6 +227,155 @@ test("public value ranking rewards more contribution per expense", () => {
     (efficient?.dimensions.efficiency ?? 0) >
       (expensive?.dimensions.efficiency ?? 0),
   );
+});
+
+test("party ranking uses average score from eligible ranked deputies", () => {
+  const result = calculatePartyRanking([
+    rankedDeputy({ id: 1, party: "AAA", score: 90 }),
+    rankedDeputy({ id: 2, party: "AAA", score: 70 }),
+    rankedDeputy({ id: 3, party: "BBB", score: 60 }),
+  ]);
+
+  assert.equal(result[0].party, "AAA");
+  assert.equal(result[0].score, 80);
+  assert.equal(result[0].rank, 1);
+  assert.equal(result[0].deputiesRanked, 2);
+  assert.equal(result[0].deputiesTotal, 2);
+});
+
+test("party ranking excludes unranked deputies from score and keeps bench total", () => {
+  const result = calculatePartyRanking([
+    rankedDeputy({ id: 1, party: "AAA", score: 90 }),
+    rankedDeputy({ id: 2, party: "AAA", score: null, eligible: false }),
+  ]);
+
+  assert.equal(result[0].score, 90);
+  assert.equal(result[0].deputiesRanked, 1);
+  assert.equal(result[0].deputiesTotal, 2);
+});
+
+test("party ranking keeps parties without eligible deputies at the end", () => {
+  const result = calculatePartyRanking([
+    rankedDeputy({ id: 1, party: "AAA", score: null, eligible: false }),
+    rankedDeputy({ id: 2, party: "BBB", score: 75 }),
+  ]);
+
+  assert.equal(result[0].party, "BBB");
+  assert.equal(result[0].rank, 1);
+  assert.equal(result[1].party, "AAA");
+  assert.equal(result[1].rank, null);
+  assert.equal(result[1].score, null);
+});
+
+test("party ranking sorts by score desc and breaks ties by party", () => {
+  const result = calculatePartyRanking([
+    rankedDeputy({ id: 1, party: "CCC", score: 80 }),
+    rankedDeputy({ id: 2, party: "AAA", score: 80 }),
+    rankedDeputy({ id: 3, party: "BBB", score: 90 }),
+  ]);
+
+  assert.deepEqual(
+    result.map((party) => party.party),
+    ["BBB", "AAA", "CCC"],
+  );
+});
+
+test("party ranking averages dimensions from eligible deputies only", () => {
+  const result = calculatePartyRanking([
+    rankedDeputy({
+      id: 1,
+      party: "AAA",
+      score: 90,
+      dimensions: { contribution: 80, publicVotes: null },
+    }),
+    rankedDeputy({
+      id: 2,
+      party: "AAA",
+      score: 70,
+      dimensions: { contribution: 60, publicVotes: 40 },
+    }),
+    rankedDeputy({
+      id: 3,
+      party: "AAA",
+      score: null,
+      eligible: false,
+      dimensions: { contribution: 10, publicVotes: 10 },
+    }),
+  ]);
+
+  assert.equal(result[0].dimensions.contribution, 70);
+  assert.equal(result[0].dimensions.publicVotes, 40);
+});
+
+test("party ranking for period uses the selected snapshot period", () => {
+  const record = deputy(1, {
+    publicContributionPoints: 10,
+    publicClassifiedProposals: 2,
+    publicTotalProposals: 2,
+  });
+  const snapshot: RankingSnapshot = {
+    version: 2,
+    generatedAt: "2026-06-15T00:00:00.000Z",
+    timezone: "America/Fortaleza",
+    defaultPeriod: "2026",
+    sources: [],
+    deputies: [
+      {
+        id: record.id,
+        slug: record.slug,
+        name: record.name,
+        civilName: record.civilName,
+        photoUrl: record.photoUrl,
+        chamberUrl: record.chamberUrl,
+        electionNumber: record.electionNumber,
+        tseSequence: record.tseSequence,
+        electionStatus: record.electionStatus,
+        assetsTotal: record.assetsTotal,
+        assetsCount: record.assetsCount,
+      },
+    ],
+    periods: [
+      {
+        id: "2025",
+        label: "2025",
+        start: "2025-01-01",
+        end: "2025-12-31",
+        partial: false,
+        deputies: [
+          {
+            id: record.id,
+            party: "AAA",
+            state: record.state,
+            officeStart: record.officeStart,
+            officeEnd: record.officeEnd,
+            daysInOffice: record.daysInOffice,
+            metrics: record.metrics,
+          },
+        ],
+      },
+      {
+        id: "2026",
+        label: "2026",
+        start: "2026-01-01",
+        end: "2026-06-15",
+        partial: true,
+        deputies: [
+          {
+            id: record.id,
+            party: "BBB",
+            state: record.state,
+            officeStart: record.officeStart,
+            officeEnd: record.officeEnd,
+            daysInOffice: record.daysInOffice,
+            metrics: record.metrics,
+          },
+        ],
+      },
+    ],
+  };
+
+  assert.equal(calculatePartyRankingForPeriod(snapshot, "2026")[0].party, "BBB");
+  assert.equal(calculatePartyRankingForPeriod(snapshot, "2025")[0].party, "AAA");
 });
 
 test("score bands follow the traffic-light thresholds", () => {
