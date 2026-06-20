@@ -18,6 +18,10 @@ export async function DataBanner() {
 }
 
 async function getBannerStats() {
+  if (!process.env.DATABASE_URL) {
+    return null;
+  }
+
   try {
     return await getDataBannerStats();
   } catch (error) {
