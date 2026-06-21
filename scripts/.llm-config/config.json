@@ -1,6 +1,6 @@
 {
-  "lastProvider": "openai",
-  "lastModel": "gpt-5.4-mini",
+  "lastProvider": "lmstudio",
+  "lastModel": "qwen/qwen3-14b",
   "lastMode": "advanced",
   "providers": {
     "openai": {
@@ -13,5 +13,5 @@
       "baseUrl": "http://localhost:1234/v1"
     }
   },
-  "lastTarget": "votes"
+  "lastTarget": "proposals"
 }

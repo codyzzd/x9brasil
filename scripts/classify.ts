@@ -79,6 +79,26 @@ const MATERIALIZE_CLASSIFICATION_BATCH_SIZE = 25;
 const DEFAULT_LIMIT = 10;
 const DEFAULT_CONCURRENCY = 1;
 const DEFAULT_DELAY_MS = 2000;
+const TERMINAL_COLORS_ENABLED = Boolean(process.stdout.isTTY && !process.env.NO_COLOR);
+
+function colorize(text: string, code: number) {
+  return TERMINAL_COLORS_ENABLED ? `\x1b[${code}m${text}\x1b[0m` : text;
+}
+
+const terminal = {
+  success: (text: string) => colorize(text, 32),
+  error: (text: string) => colorize(text, 31),
+  warning: (text: string) => colorize(text, 33),
+  info: (text: string) => colorize(text, 36),
+  muted: (text: string) => colorize(text, 90),
+};
+
+function colorStatus(status: ClassificationRunStatus) {
+  if (status === "completed") return terminal.success(status);
+  if (status === "failed" || status === "cancelled") return terminal.error(status);
+  if (status === "paused") return terminal.warning(status);
+  return terminal.info(status);
+}
 
 type Row = Record<string, unknown>;
 type ClassifyTarget = "votes" | "proposals" | "both";
@@ -369,7 +389,7 @@ async function fetchByIds<T extends Row>(table: string, ids: string[], select = 
       rows.push(...await fetchByIdsBatch<T>(table, batch, select, column, orderColumn));
     } catch (error) {
       if (!isStatementTimeout(error) || batch.length === 1) throw error;
-      console.log(`  ⚠ Timeout lendo ${table}; reduzindo lote de ${batch.length} para consultas individuais.`);
+      console.log(terminal.warning(`  ⚠ Timeout lendo ${table}; reduzindo lote de ${batch.length} para consultas individuais.`));
       for (const id of batch) {
         rows.push(...await fetchByIdsBatch<T>(table, [id], select, column, orderColumn));
       }
@@ -603,7 +623,7 @@ async function fetchRunItems(
 }
 
 async function markRunItemProcessing(item: ClassificationRunItemRow) {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("classification_run_items")
     .update({
       status: "processing",
@@ -611,15 +631,20 @@ async function markRunItemProcessing(item: ClassificationRunItemRow) {
       started_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .eq("id", item.id);
+    .eq("run_id", item.run_id)
+    .eq("target", item.target)
+    .eq("item_id", item.item_id)
+    .select("id")
+    .single();
   if (error) throw new Error(`Failed to mark run item processing: ${error.message}`);
+  if (!data) throw new Error(`Failed to mark run item processing: item ${item.run_id}/${item.target}/${item.item_id} not found`);
 }
 
 async function markRunItemDone(item: ClassificationRunItemRow, status: "classified" | "failed" | "skipped", params: {
   durationMs: number;
   error?: unknown;
 }) {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("classification_run_items")
     .update({
       status,
@@ -629,8 +654,13 @@ async function markRunItemDone(item: ClassificationRunItemRow, status: "classifi
       finished_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .eq("id", item.id);
+    .eq("run_id", item.run_id)
+    .eq("target", item.target)
+    .eq("item_id", item.item_id)
+    .select("id")
+    .single();
   if (error) throw new Error(`Failed to mark run item ${status}: ${error.message}`);
+  if (!data) throw new Error(`Failed to mark run item ${status}: item ${item.run_id}/${item.target}/${item.item_id} not found`);
 }
 
 function pairKey(legislatorId: number, periodId: string) {
@@ -808,6 +838,14 @@ function clampConfidence(value: unknown) {
   return Math.min(1, Math.max(0, parsed));
 }
 
+function normalizeProposalCategory(value: unknown): PublicValueCategory | null {
+  const categories = Object.keys(PUBLIC_VALUE_CATEGORIES) as PublicValueCategory[];
+  if (typeof value !== "string") return null;
+  if ((categories as string[]).includes(value)) return value as PublicValueCategory;
+  const matches = categories.filter((category) => value.split("|").map((part) => part.trim()).includes(category));
+  return matches[0] ?? null;
+}
+
 function truncatePrompt(prompt: string, model: string) {
   const contextLimit = detectContextLimit(model);
   const tokens = estimateTokens(prompt);
@@ -882,20 +920,22 @@ Categorias: "anti_corruption" | "public_transparency" | "waste_reduction" | "hea
 Retorne APENAS JSON válido:
 {
   "analysisMethodVersion": "legislative-impact-v2",
-  "category": "anti_corruption | public_transparency | waste_reduction | health | education | security | infrastructure | jobs_economy | state_modernization | technology_innovation | deregulation | tribute | commemorative_date | motion | place_naming",
-  "confidence": "high | medium | low",
-  "legislativeType": "PL | PLP | PEC | PDL | PRC | MPV | RIC | PFC | REQ | EMP | SBT | DTQ | VTS | RCP | MSC | INC | OUTRO | INCERTO",
-  "decisionNature": "substantive_policy | constitutional_change | fiscal_budgetary | oversight_control | information_request | criminal_penalty | rights_expansion | rights_restriction | institutional_rule | symbolic | commemorative | procedural | unclear",
-  "decisionScope": "national_policy | constitutional_rule | fiscal_effect | criminal_law | administrative_control | congressional_procedure | oversight | symbolic_only | local_or_specific | unclear",
+  "category": "anti_corruption",
+  "confidence": "medium",
+  "legislativeType": "REQ",
+  "decisionNature": "oversight_control",
+  "decisionScope": "oversight",
   "declaredBenefit": "Benefício aparente da proposta.",
   "hiddenCost": "Custo escondido, exceção, revogação ou efeito colateral relevante.",
-  "netPublicEffect": "positive | negative | mixed | unclear",
+  "netPublicEffect": "positive",
   "hasTradeoff": true,
-  "summaryMatchesText": "true | false | unclear",
-  "riskFlags": ["benefit_offset_by_hidden_cost | hidden_revocation | scope_mismatch | unrelated_amendment | jabuti | privilege_or_benefit | corporate_or_category_benefit | economic_group_benefit | fiscal_impact | transparency_reduction | oversight_reduction | constitutional_risk | increased_workload | increased_cost_or_tax | increased_bureaucracy | reduced_rights | procedural_only | insufficient_text | none"],
+  "summaryMatchesText": "true",
+  "riskFlags": ["none"],
   "criticalArticles": [{ "article": "Art. X", "issue": "Explicação curta do ponto de atenção." }],
   "justification": "Explicação curta em português com critério principal, benefício aparente, riscos, trade-offs e efeito líquido."
-}`;
+}
+
+Use exatamente UM valor em "category". Nunca responda "categoria1 | categoria2" nem lista de categorias.`;
   }
   return `Você é um analista político sênior especializado no processo legislativo brasileiro.
 Classifique a proposição da Câmara dos Deputados de acordo com valor público e interesse social.
@@ -926,10 +966,12 @@ CATEGORIAS DE VALOR PÚBLICO:
 
 Responda APENAS com JSON válido:
 {
-  "category": "anti_corruption" | "public_transparency" | "waste_reduction" | "health" | "education" | "security" | "infrastructure" | "jobs_economy" | "state_modernization" | "technology_innovation" | "deregulation" | "tribute" | "commemorative_date" | "motion" | "place_naming",
-  "confidence": "high" | "medium" | "low",
+  "category": "anti_corruption",
+  "confidence": "medium",
   "justification": "Explicação curta e simples em português, com 1 ou 2 frases, dizendo o critério principal e por que a proposição se enquadra nessa categoria."
-}`;
+}
+
+Use exatamente UM valor em "category". Nunca responda "categoria1 | categoria2" nem lista de categorias.`;
 }
 
 function votePrompt(vote: VoteRow, level: AnalysisLevel, fullText?: FullTextResult) {
@@ -1093,8 +1135,8 @@ Retorne APENAS JSON válido neste formato:`,
 
 function parseProposalResult(text: string): ProposalLlmResult {
   const parsed = JSON.parse(cleanJson(text)) as Partial<ProposalLlmResult>;
-  const categories = Object.keys(PUBLIC_VALUE_CATEGORIES);
-  if (!parsed.category || !categories.includes(parsed.category)) {
+  const category = normalizeProposalCategory(parsed.category);
+  if (!category) {
     throw new Error(`categoria inválida: ${parsed.category}`);
   }
   if (!["high", "medium", "low"].includes(String(parsed.confidence))) {
@@ -1104,7 +1146,7 @@ function parseProposalResult(text: string): ProposalLlmResult {
     throw new Error("justificativa ausente ou curta demais");
   }
   const result = normalizeProposalAnalysis({
-    category: parsed.category,
+    category,
     confidence: parsed.confidence,
     justification: parsed.justification,
     source: "llm",
@@ -1397,7 +1439,7 @@ A resposta anterior não foi JSON válido. Responda agora SOMENTE com o objeto J
     } catch (error) {
       lastError = error;
       if (attempt === 0) {
-        console.log(`  ⚠ Resposta fora do JSON em ${params.label}; tentando corrigir uma vez.`);
+        console.log(terminal.warning(`  ⚠ Resposta fora do JSON em ${params.label}; tentando corrigir uma vez.`));
         continue;
       }
       throw new Error(
@@ -1781,6 +1823,22 @@ async function materializeVoteScores(limit: number) {
   return { classified: 0, failed: 0, skipped: 0, linksUpdated: affectedPairs.size, metricRows };
 }
 
+async function materializeProposalScores(limit: number) {
+  const classifications = await fetchAll<{ proposal_id: string }>(
+    "proposal_classifications",
+    "proposal_id",
+    "proposal_id",
+  );
+  const toProcess = classifications.slice(0, limit);
+  const proposalIds = toProcess.map((row) => row.proposal_id);
+
+  console.log(`\nMaterialização: ${classifications.length} classificações de proposições disponíveis; processando ${toProcess.length}`);
+  console.log("Materialização: recalculando métricas de proposições dos parlamentares vinculados...");
+  const metricRows = await updateProposalMetrics(proposalIds);
+  console.log(`Materialização: ${metricRows} linhas de métricas de proposições recalculadas.`);
+  return { classified: 0, failed: 0, skipped: 0, metricRows };
+}
+
 async function classifyProposals(params: {
   level: AnalysisLevel;
   runId: string;
@@ -1827,7 +1885,7 @@ async function classifyProposals(params: {
     if (!proposal) {
       const elapsedMs = recordDuration(recentDurations, start);
       await markRunItemDone(item, "skipped", { durationMs: elapsedMs, error: new Error("Proposição não encontrada no banco") });
-      console.log("  ⚠ Proposição não encontrada; item pulado.");
+      console.log(terminal.warning("  ⚠ Proposição não encontrada; item pulado."));
       return;
     }
     if (proposal.summary) {
@@ -1841,7 +1899,7 @@ async function classifyProposals(params: {
           fullText = result;
           console.log(`  Inteiro teor: ${result.wordCount} palavras, ~${result.tokenEstimate} tokens (${result.fromCache ? "cache" : "baixado"})`);
         } else {
-          console.log("  ⚠ Sem inteiro teor; análise N3 será limitada e conservadora");
+          console.log(terminal.warning("  ⚠ Sem inteiro teor; análise N3 será limitada e conservadora"));
         }
       }
       const parsed = await generateJsonResult({
@@ -1866,25 +1924,25 @@ async function classifyProposals(params: {
       updatedProposalIds.push(proposal.id);
       const elapsedMs = recordDuration(recentDurations, start);
       await markRunItemDone(item, "classified", { durationMs: elapsedMs });
-      console.log(`  ✓ Classificação: ${PUBLIC_VALUE_CATEGORIES[parsed.category].label} (${parsed.confidence})`);
+      console.log(terminal.success(`  ✓ Classificação: ${PUBLIC_VALUE_CATEGORIES[parsed.category].label} (${parsed.confidence})`));
       console.log(`  Justificativa: ${shortText(parsed.justification)}`);
       console.log(`  Tempo do item: ${formatEta(elapsedMs)}`);
     } catch (error) {
       const elapsedMs = recordDuration(recentDurations, start);
       failed += 1;
       await markRunItemDone(item, "failed", { durationMs: elapsedMs, error });
-      console.log(`  ✗ Falha: ${errorMessage(error).substring(0, 120)}`);
+      console.log(terminal.error(`  ✗ Falha: ${errorMessage(error).substring(0, 120)}`));
       console.log(`  Tempo do item: ${formatEta(elapsedMs)}`);
       if (isHardQuotaError(error)) pausedError = error;
     }
     const counts = await refreshRunCounts(params.runId);
-    console.log(`  Run: ${counts.classified_count} classificados | ${counts.failed_count} falhas | ${counts.pending_count} pendentes`);
+    console.log(`  Run: ${terminal.success(`${counts.classified_count} classificados`)} | ${terminal.error(`${counts.failed_count} falhas`)} | ${terminal.warning(`${counts.pending_count} pendentes`)}`);
     if (params.concurrency === 1 && index < toProcess.length - 1) await sleep(DEFAULT_DELAY_MS);
   });
 
   if (pausedError) {
     await updateRunStatus(params.runId, "paused", errorMessage(pausedError));
-    console.log(`\nExecução pausada por quota/limite: ${shortText(errorMessage(pausedError), 180)}`);
+    console.log(terminal.warning(`\nExecução pausada por quota/limite: ${shortText(errorMessage(pausedError), 180)}`));
     return { classified: updatedProposalIds.length, failed, skipped: 0, metricRows: 0 };
   }
 
@@ -1942,7 +2000,7 @@ async function classifyVotes(params: {
     if (!vote) {
       const elapsedMs = recordDuration(recentDurations, start);
       await markRunItemDone(item, "skipped", { durationMs: elapsedMs, error: new Error("Votação não encontrada no banco") });
-      console.log("  ⚠ Votação não encontrada; item pulado.");
+      console.log(terminal.warning("  ⚠ Votação não encontrada; item pulado."));
       return;
     }
     if (vote.description) {
@@ -1956,7 +2014,7 @@ async function classifyVotes(params: {
           fullText = result;
           console.log(`  Inteiro teor: proposição #${result.proposicaoId}, ${result.wordCount} palavras, ~${result.tokenEstimate} tokens (${result.fromCache ? "cache" : "baixado"})`);
         } else {
-          console.log("  ⚠ Sem inteiro teor; análise N3 será limitada e conservadora");
+          console.log(terminal.warning("  ⚠ Sem inteiro teor; análise N3 será limitada e conservadora"));
         }
       }
       let parsed = await generateJsonResult({
@@ -2051,25 +2109,25 @@ async function classifyVotes(params: {
       analyses.set(vote.id, normalized);
       const elapsedMs = recordDuration(recentDurations, start);
       await markRunItemDone(item, "classified", { durationMs: elapsedMs });
-      console.log(`  ✓ Classificação: ${parsed.classification} | Severidade: ${parsed.severity} | Voto público: ${parsed.publicInterestVote}`);
+      console.log(terminal.success(`  ✓ Classificação: ${parsed.classification} | Severidade: ${parsed.severity} | Voto público: ${parsed.publicInterestVote}`));
       console.log(`  Justificativa: ${shortText(parsed.reason)}`);
       console.log(`  Tempo do item: ${formatEta(elapsedMs)}`);
     } catch (error) {
       const elapsedMs = recordDuration(recentDurations, start);
       failed += 1;
       await markRunItemDone(item, "failed", { durationMs: elapsedMs, error });
-      console.log(`  ✗ Falha: ${errorMessage(error).substring(0, 120)}`);
+      console.log(terminal.error(`  ✗ Falha: ${errorMessage(error).substring(0, 120)}`));
       console.log(`  Tempo do item: ${formatEta(elapsedMs)}`);
       if (isHardQuotaError(error)) pausedError = error;
     }
     const counts = await refreshRunCounts(params.runId);
-    console.log(`  Run: ${counts.classified_count} classificados | ${counts.failed_count} falhas | ${counts.pending_count} pendentes`);
+    console.log(`  Run: ${terminal.success(`${counts.classified_count} classificados`)} | ${terminal.error(`${counts.failed_count} falhas`)} | ${terminal.warning(`${counts.pending_count} pendentes`)}`);
     if (params.concurrency === 1 && index < toProcess.length - 1) await sleep(DEFAULT_DELAY_MS);
   });
 
   if (pausedError) {
     await updateRunStatus(params.runId, "paused", errorMessage(pausedError));
-    console.log(`\nExecução pausada por quota/limite: ${shortText(errorMessage(pausedError), 180)}`);
+    console.log(terminal.warning(`\nExecução pausada por quota/limite: ${shortText(errorMessage(pausedError), 180)}`));
     return {
       classified: analyses.size,
       failed,
@@ -2151,7 +2209,12 @@ async function selectPostProcessMode(rl: Wizard, target: ClassifyTarget, limit: 
   console.log("\nPós-processamento de scores:");
   console.log("  1) Só classificar — grava análises, sem recalcular ranking agora");
   console.log("  2) Classificar e recalcular afetados — atualiza score/ranking ao final");
-  console.log("  3) Só materializar votações — não chama IA, recalcula scores com análises já gravadas");
+  const materializeLabel = target === "votes"
+    ? "votações"
+    : target === "proposals"
+      ? "proposições"
+      : "votações e proposições";
+  console.log(`  3) Só materializar ${materializeLabel} — não chama IA, recalcula scores com análises já gravadas`);
   const answer = await question(rl, `Escolha [${fallback}]: `);
   const value = answer || fallback;
   if (value === "3") return "materialize_only";
@@ -2171,9 +2234,13 @@ async function selectStrongReview(config: Awaited<ReturnType<typeof loadConfig>>
   return { enabled: true, provider: selection.provider, model: selection.model };
 }
 
-function postProcessModeLabel(mode: PostProcessMode) {
+function postProcessModeLabel(mode: PostProcessMode, target?: ClassifyTarget) {
   if (mode === "classify_only") return "Só classificar, sem recalcular ranking agora";
-  if (mode === "materialize_only") return "Só materializar votações já classificadas";
+  if (mode === "materialize_only") {
+    if (target === "proposals") return "Só materializar proposições já classificadas";
+    if (target === "both") return "Só materializar votações e proposições já classificadas";
+    return "Só materializar votações já classificadas";
+  }
   return "Classificar e recalcular afetados";
 }
 
@@ -2242,7 +2309,7 @@ async function confirmRun(rl: Wizard, params: {
   console.log(`  Escopo: ${params.scope === "overwrite" ? "Sobrescrever mesmo nível/inferior" : "Pendentes/melhoráveis"}`);
   console.log(`  Limite por alvo: ${params.limit}`);
   console.log(`  Processos simultâneos: ${params.concurrency}`);
-  console.log(`  Pós-processamento: ${postProcessModeLabel(params.postProcessMode)}`);
+  console.log(`  Pós-processamento: ${postProcessModeLabel(params.postProcessMode, params.target)}`);
   if (params.providerName && params.model) {
     console.log(`  Provedor/modelo leve: ${params.providerName} / ${params.model}`);
     if (params.level === 3) {
@@ -2256,7 +2323,7 @@ async function confirmRun(rl: Wizard, params: {
     console.log("  Provedor/modelo: não usado");
   }
   if (params.providerName === "OpenAI" && params.concurrency > 3) {
-    console.log("  ⚠ OpenAI com mais de 3 processos simultâneos aumenta bastante o risco de 429. Recomendado: 2 ou 3.");
+    console.log(terminal.warning("  ⚠ OpenAI com mais de 3 processos simultâneos aumenta bastante o risco de 429. Recomendado: 2 ou 3."));
   }
   const answer = await question(rl, "Executar e gravar no banco? [s/N]: ");
   return answer.toLocaleLowerCase("pt-BR") === "s";
@@ -2385,7 +2452,12 @@ async function main() {
     votes: { classified: 0, failed: 0, skipped: 0, metricRows: 0, linksUpdated: 0 },
   };
   if (postProcessMode === "materialize_only") {
-    stats.votes = await materializeVoteScores(limit);
+    if (target === "votes" || target === "both") {
+      stats.votes = await materializeVoteScores(limit);
+    }
+    if (target === "proposals" || target === "both") {
+      stats.proposals = await materializeProposalScores(limit);
+    }
   } else if (selection) {
     const runParams = {
       level,
@@ -2410,17 +2482,17 @@ async function main() {
 
   const elapsedMs = Date.now() - started;
   console.log("\n====================================");
-  console.log(postProcessMode === "materialize_only"
+  console.log(terminal.success(postProcessMode === "materialize_only"
     ? "Materialização de scores concluída no banco"
-    : "Classificação LLM gravada diretamente no banco");
+    : "Classificação LLM gravada diretamente no banco"));
   console.log(`${postProcessMode === "materialize_only" ? "Nível selecionado" : "Nível gravado"}: ${level}`);
-  console.log(`Tempo total: ${formatEta(elapsedMs)} (${formatCompletionDate(0)})`);
-  console.log(`Run: ${finalRun.id.slice(0, 8)} · status ${finalRun.status} · ${finalRun.classified_count}/${finalRun.total_items} classificados · ${finalRun.failed_count} falhas · ${finalRun.pending_count} pendentes`);
-  console.log(`Votações: ${stats.votes.classified} classificadas, ${stats.votes.failed} falhas, ${stats.votes.skipped} puladas, ${stats.votes.metricRows} métricas recalculadas`);
-  console.log(`Proposições: ${stats.proposals.classified} classificadas, ${stats.proposals.failed} falhas, ${stats.proposals.skipped} puladas, ${stats.proposals.metricRows} métricas recalculadas`);
+  console.log(`${terminal.muted("Tempo total")}: ${formatEta(elapsedMs)} (${formatCompletionDate(0)})`);
+  console.log(`Run: ${terminal.info(finalRun.id.slice(0, 8))} · status ${colorStatus(finalRun.status)} · ${terminal.success(`${finalRun.classified_count}/${finalRun.total_items} classificados`)} · ${terminal.error(`${finalRun.failed_count} falhas`)} · ${terminal.warning(`${finalRun.pending_count} pendentes`)}`);
+  console.log(`Votações: ${terminal.success(`${stats.votes.classified} classificadas`)}, ${terminal.error(`${stats.votes.failed} falhas`)}, ${terminal.warning(`${stats.votes.skipped} puladas`)}, ${terminal.info(`${stats.votes.metricRows} métricas recalculadas`)}`);
+  console.log(`Proposições: ${terminal.success(`${stats.proposals.classified} classificadas`)}, ${terminal.error(`${stats.proposals.failed} falhas`)}, ${terminal.warning(`${stats.proposals.skipped} puladas`)}, ${terminal.info(`${stats.proposals.metricRows} métricas recalculadas`)}`);
 }
 
 main().catch((error: unknown) => {
-  console.error("Erro fatal durante a classificação:", error);
+  console.error(terminal.error("Erro fatal durante a classificação:"), error);
   process.exit(1);
 });

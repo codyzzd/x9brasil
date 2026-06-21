@@ -1,159 +1,139 @@
-# Pipeline de dados e classificacoes
+# Pipeline de dados
 
-Este documento descreve o fluxo operacional atual: os dados entram no banco SQL
-CockroachDB/Postgres, as classificacoes sao gravadas no banco e o site le esse banco. Arquivos
-locais podem existir apenas como cache tecnico de download, nunca como fonte de
-verdade de classificacao ou score.
+Este documento descreve de onde os dados publicos do projeto saem, como eles
+sao transformados e onde aparecem depois. A ideia central e separar tres coisas:
+fonte oficial, processamento interno e leitura pelo produto.
 
 ## Visao geral
 
-O pipeline tem tres comandos principais:
+```text
+fontes oficiais
+  -> ingestao e normalizacao
+  -> classificacao e calculos derivados
+  -> metricas por parlamentar e periodo
+  -> ranking, perfil, comparacao, partidos e metodologia publica
+```
+
+Arquivos locais podem existir como cache tecnico ou material de auditoria, mas
+nao sao a fonte operacional do score exibido no site.
+
+## Fontes de entrada
+
+| Origem | O que entra no projeto | Para que serve depois |
+| --- | --- | --- |
+| Camara dos Deputados | Deputados, proposicoes, autores, relatorias, votacoes nominais, presencas e despesas parlamentares | ranking, perfil do parlamentar, tabelas de votacoes, producao legislativa, gastos e presenca |
+| TSE | Candidaturas, bens declarados, votos eleitorais, receitas e despesas de campanha | contexto eleitoral, patrimonio, financiadores e fornecedores de campanha |
+| Transferegov / dados.gov.br | Emendas parlamentares e execucao ligada a transferencias publicas | emendas, valores destinados e contexto orcamentario |
+| Regras do projeto | Pesos, criterios de valor publico, limites de pontuacao e regras de seguranca | transforma dado bruto em metricas comparaveis |
+| IA, quando acionada | Analise de proposicoes e votacoes com resumo ou inteiro teor | melhora a cobertura de valor publico e decide se uma votacao pode ou nao afetar score |
+
+## Caminho dos dados
+
+1. **Coleta oficial**
+
+   O projeto baixa ou le dados publicados por orgaos oficiais. Nesta etapa, o
+   dado ainda e bruto: nomes, IDs, datas, proposicoes, votacoes, despesas,
+   emendas e registros eleitorais.
+
+2. **Normalizacao**
+
+   Os dados brutos viram entidades consistentes: parlamentar, periodo,
+   proposicao, votacao, voto individual, despesa, emenda, candidatura, doador e
+   fornecedor. Essa etapa resolve chaves, formatos e relacoes entre tabelas.
+
+3. **Classificacao**
+
+   Proposicoes e votacoes passam por camadas de analise:
+
+   - regras deterministicas para uma primeira cobertura;
+   - IA com resumo quando o texto resumido e suficiente;
+   - IA com inteiro teor quando a decisao depende de leitura mais completa;
+   - revisao manual, quando existir, sempre como prioridade maxima.
+
+4. **Calculo derivado**
+
+   As classificacoes alimentam metricas por parlamentar e periodo: producao
+   legislativa, valor publico de proposicoes, impacto de votacoes, presenca,
+   gastos, emendas e dados eleitorais.
+
+5. **Publicacao no produto**
+
+   O site le as metricas ja calculadas e as apresenta em superficies diferentes:
+   ranking geral, ranking de Valor Publico, pagina do candidato, comparacao,
+   partidos, tabelas detalhadas e pagina de metodologia.
+
+## Comandos operacionais
 
 ```bash
-npm run data:supabase:ingest
+npm run data:db:ingest
 npm run data:regex
 npm run data:classify
 ```
 
-- `data:db:ingest` carrega CSV/ZIP em tabelas do banco.
-- `data:supabase:ingest` ainda existe como alias de compatibilidade.
-- `data:regex` aplica classificacao nivel 1 por regra deterministica.
-- `data:classify` roda IA nivel 2 ou 3 por wizard e grava direto no banco.
-
-Variaveis exigidas para escrita no banco:
-
-- `DATABASE_URL`
-- `DATABASE_POOL_MAX` opcional, padrao `10`
-
-Chaves de IA, quando usadas:
-
-- `OPENAI_API_KEY`
-- `GEMINI_API_KEY`
-
-O wizard tambem pode pedir a chave no terminal para uso apenas na sessao.
-
-## Fontes externas
-
-| Fonte | Host | Dados usados |
-| --- | --- | --- |
-| Camara dos Deputados | `dadosabertos.camara.leg.br` | Deputados, proposicoes, votacoes, presenca, gastos parlamentares |
-| TSE | `cdn.tse.jus.br` | Candidatos, bens, votos eleitorais, receitas e despesas de campanha |
-| Transferegov / dados.gov.br | `repositorio.dados.gov.br` | Emendas parlamentares |
-
-## Tabelas principais
-
-| Tabela | Conteudo |
-| --- | --- |
-| `legislators` | Identidade basica dos parlamentares |
-| `legislator_details` | Dados pessoais e detalhes complementares |
-| `periods` | Periodos de ranking |
-| `legislator_period_metrics` | Metricas agregadas por parlamentar e periodo |
-| `proposals` | Proposicoes globais |
-| `legislator_proposals` | Relacao parlamentar-proposicao-periodo |
-| `proposal_classifications` | Classificacao de valor publico das proposicoes |
-| `votes` | Votacoes globais |
-| `vote_classifications` | Classificacao de valor publico das votacoes |
-| `legislator_votes` | Voto de cada parlamentar e pontuacao calculada |
-| `legislator_amendments` | Emendas parlamentares |
-| `sources` | Fontes usadas |
-| `snapshot_metadata` | Metadados gerais do processamento |
+- `data:db:ingest` importa CSV/ZIP e normaliza dados oficiais.
+- `data:regex` aplica a primeira classificacao automatica por regra.
+- `data:classify` roda o wizard de IA para nivel 2 ou nivel 3.
 
 ## Niveis de analise
 
-### Nivel 1: regra automatica
+| Nivel | Entrada principal | Saida | Quando usar |
+| --- | --- | --- | --- |
+| Nivel 1 | Ementa, descricao e regras locais | classificacao inicial | cobertura rapida e deterministica |
+| Nivel 2 | Resumo ja coletado | classificacao por IA com explicacao curta | quando o resumo basta para entender o impacto |
+| Nivel 3 | Inteiro teor ou texto mais completo | classificacao mais cautelosa | quando a votacao ou proposicao exige mais evidencias |
+| Revisao manual | Decisao humana auditada | classificacao revisada | quando a maquina nao deve decidir sozinha |
 
-```bash
-npm run data:regex
-```
+Precedencia:
 
-O comando:
+1. Revisao manual.
+2. Nivel 3.
+3. Nivel 2.
+4. Nivel 1.
+5. Pendente.
 
-- le `proposals` e `votes` diretamente do banco;
-- aplica regras de `src/lib/public-value.ts`;
-- grava `source = 'rule'` e `analysis_level = 1`;
-- nao substitui classificacoes nivel 2, nivel 3 ou revisadas;
-- recalcula metricas afetadas em `legislator_period_metrics`;
-- atualiza `legislator_votes` quando a classificacao de voto muda.
-
-### Nivel 2: IA com resumo
-
-```bash
-npm run data:classify
-```
-
-No wizard, escolha `Nível 2 · IA com resumo`.
-
-O comando:
-
-- usa ementa, descricao e resumo ja salvos no banco;
-- grava `source = 'llm'` e `analysis_level = 2`;
-- pode substituir nivel 1;
-- nao substitui nivel 3;
-- recalcula metricas no final do lote.
-
-### Nivel 3: IA com inteiro teor
-
-```bash
-npm run data:classify
-```
-
-No wizard, escolha `Nível 3 · IA com inteiro teor`.
-
-O comando:
-
-- busca o inteiro teor da proposicao pela API da Camara;
-- usa cache tecnico em `scripts/.llm-cache` para evitar baixar o mesmo arquivo
-  repetidamente;
-- grava `source = 'llm'` e `analysis_level = 3`;
-- pode substituir nivel 1 e 2;
-- pula itens sem inteiro teor disponivel;
-- recalcula metricas no final do lote.
-
-## Precedencia
-
-A prioridade correta e:
-
-1. Revisao manual (`source = 'reviewed'`), quando existir.
-2. Nivel 3: IA com inteiro teor.
-3. Nivel 2: IA com resumo.
-4. Nivel 1: regra automatica.
-5. Sem classificacao: pendente.
-
-Na operacao automatizada:
-
-- nivel 1 nao derruba nivel 2/3;
-- nivel 2 pode melhorar nivel 1, mas nao derruba nivel 3;
-- nivel 3 pode melhorar nivel 1/2;
-- o modo de sobrescrita do wizard reprocessa apenas o mesmo nivel ou inferior.
-
-## Como o ranking usa as classificacoes
+## Como isso vira score
 
 Proposicoes:
 
-- a classificacao fica em `proposal_classifications`;
-- a relacao com parlamentar fica em `legislator_proposals`;
-- a metrica agregada entra em `legislator_period_metrics.public_contribution_points`;
-- tambem atualiza `public_classified_proposals` e `public_total_proposals`.
+- a classificacao de valor publico identifica a categoria e a relevancia;
+- a relacao parlamentar-proposicao define autoria, coautoria, relatoria ou
+  participacao;
+- o periodo define onde a contribuicao entra;
+- o resultado alimenta a dimensao de producao legislativa com valor publico.
 
 Votacoes:
 
-- a classificacao global fica em `vote_classifications`;
-- cada parlamentar tem seu voto em `legislator_votes`;
-- o alinhamento do voto gera `score_delta`;
-- os agregados entram em `public_vote_positive_points`,
-  `public_vote_negative_penalties`, `public_vote_absence_penalties`,
-  `public_votes_analyzed`, `public_vote_average_confidence` e
-  `public_vote_score`.
+- a classificacao global explica o objeto votado, o que significa votar sim ou
+  nao e se existe interesse publico claro;
+- cada voto individual e comparado com a direcao de interesse publico;
+- casos ambiguos, procedimentais, mistos ou sem texto suficiente ficam
+  analisados sem afetar score;
+- apenas votacoes com evidencia suficiente entram no impacto de Valor Publico.
 
-## Fluxo mental
+Outras dimensoes:
 
-```text
-fontes oficiais
-  -> tabelas CockroachDB/Postgres
-  -> classificacao nivel 1/2/3 no banco
-  -> metricas agregadas no banco
-  -> site le o banco
-```
+- presenca, despesas, emendas, patrimonio, receitas e despesas eleitorais entram
+  como metricas de contexto e comparacao;
+- dados ausentes reduzem cobertura, mas nao devem virar penalidade automatica
+  sem regra explicita.
 
-O ponto central: classificacao e score vivem em tabelas normalizadas do
-banco SQL, nao em arquivos intermediarios.
+## Para onde os dados vao
+
+| Saida | O que mostra |
+| --- | --- |
+| Ranking | posicao, score e dimensoes comparaveis por periodo |
+| Perfil do candidato | detalhes, evolucao anual, votacoes, proposicoes, gastos, emendas e dados eleitorais |
+| Comparacao | diferencas entre candidatos nas mesmas dimensoes |
+| Partidos | agregacao dos parlamentares elegiveis por partido |
+| Metodologia | explicacao publica dos criterios, pesos, cobertura e limites |
+| Auditoria interna | classificacoes, motivos, confianca, status de revisao e versao metodologica |
+
+## Contrato importante
+
+O pipeline deve preservar rastreabilidade:
+
+- todo dado exibido precisa ter uma origem reconhecivel;
+- toda classificacao automatica precisa indicar nivel, fonte e versao;
+- todo score derivado precisa ser recalculavel a partir das metricas-base;
+- casos duvidosos devem ficar pendentes ou neutros, nao receber pontuacao
+  agressiva por falta de evidencia.
